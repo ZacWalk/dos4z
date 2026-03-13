@@ -1,0 +1,22 @@
+name: Build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Build tools (demu.exe, dimg.exe)
+      shell: pwsh
+      run: .\make-tools.ps1
+
+    - name: Build MS-DOS 4.0
+      shell: pwsh
+      run: .\make-dos.ps1
