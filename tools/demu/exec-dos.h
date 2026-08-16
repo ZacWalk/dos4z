@@ -17,7 +17,6 @@ int      dosFreeMem(Word seg);
 int      dosResizeMem(Word seg, Word newSize);
 Word     getMcbHead(void);
 Word     getPspSegment(void);
-void     setMcbHead(Word seg);
 void     setPspSegment(Word seg);
 
 /* DTA */
@@ -31,10 +30,9 @@ int     *getFds(void);
 int      getFdCount(void);
 unsigned char *getFdCR(void);
 void     setFds(int *fds, unsigned char *cr, int count);
-int      getFreeFd(void);
 
 /* Exit */
-int      sysExit(struct exe *e, int rc);
+int      sysExit(int rc);
 
 /* Last child exit code */
 int      getLastChildExitCode(void);
@@ -42,6 +40,9 @@ void     setLastChildExitCode(int rc);
 
 /* Native command dispatch (for LIB.EXE etc.) */
 int      runNativeCommand(const char *cmdName, const char *args);
+
+/* OMF library manager (lib-omf.c) — the "lib" native command */
+int      nativeLib(const char *args);
 
 /* ── EXEC handler (called from INT 21h/4Bh) ─────────────────────────── */
 

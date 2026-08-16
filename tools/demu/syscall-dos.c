@@ -15,10 +15,7 @@
 #include "exe.h"
 #include "exec-dos.h"
 
-extern int f_verbose;
 extern int f_shell;
-extern Word loadSegment;
-extern Byte shadowRam[];
 
 char demuExePath[MAX_PATH];  /* path to demu.exe itself */
 static int lastChildExitCode;       /* exit code from last EXEC child */
@@ -92,9 +89,7 @@ Word dosAllocMem(Word paragraphs)
 {
     /* First-fit search through MCB chain */
     Word seg = mcbHead;
-    Word bestSeg = 0;
     Word largest = 0;
-    (void)bestSeg;
     while (1) {
         Byte type = mcbType(seg);
         Word owner = mcbOwner(seg);
@@ -299,7 +294,7 @@ int checkStackDOS(struct exe *e)
     return (e->t_stackLow && ((DWord)ss() << 4) + sp() <= e->t_stackLow);
 }
 
-static int SysWrite(struct exe *e, int fd, char *buf, size_t n)
+static int sysWrite(int fd, const char *buf, size_t n)
 {
     return _write(fd, buf, (unsigned int)n);
 }
@@ -308,7 +303,6 @@ static int SysWrite(struct exe *e, int fd, char *buf, size_t n)
 
 Word getMcbHead(void)      { return mcbHead; }
 Word getPspSegment(void)   { return pspSegment; }
-void setMcbHead(Word seg)  { mcbHead = seg; }
 void setPspSegment(Word s) { pspSegment = s; }
 
 Word getDtaSeg(void)       { return dtaSeg; }
@@ -323,7 +317,6 @@ void setFds(int *fds, unsigned char *cr, int count) {
     free(fileDescriptors); free(fdLastWasCR);
     fileDescriptors = fds; fdLastWasCR = cr; fileDescriptorCount = count;
 }
-int getFreeFd(void)            { return getDescriptor(); }
 
 int  getLastChildExitCode(void) { return lastChildExitCode; }
 void setLastChildExitCode(int rc) { lastChildExitCode = rc; }
@@ -348,7 +341,7 @@ int handleSyscallDOS(struct exe *e, int intno)
 
     /* INT 20h = terminate (used by COM files and PSP:0000) */
     if (intno == 0x20) {
-        sysExit(e, 0);
+        sysExit(0);
         return 1;
     }
 
@@ -399,7 +392,7 @@ int handleSyscallDOS(struct exe *e, int intno)
             break;
 
         case 0x2100:    /* Terminate program */
-            sysExit(e, 0);
+            sysExit(0);
             break;
 
         case 0x2101:    /* Read character with echo */
@@ -469,7 +462,7 @@ int handleSyscallDOS(struct exe *e, int intno)
         case 0x2109:    /* Display string (terminated by '$') */
             addr = dsdx();
             p = strchr(addr, '$');
-            if (p) SysWrite(e, fileDescriptors[1], addr, p-addr);
+            if (p) sysWrite(fileDescriptors[1], addr, p-addr);
             break;
 
         case 0x210a:    /* Buffered keyboard input */
@@ -857,9 +850,9 @@ int handleSyscallDOS(struct exe *e, int intno)
                 char *wdata = dsdxparms(false, cx());
                 fprintf(stderr, "  Write: fd=%d(host %d) len=%d \"%.40s\"\n",
                     bx(), fileDescriptor, cx(), wdata);
-                sysdata = SysWrite(e, fileDescriptor, wdata, cx());
+                sysdata = sysWrite(fileDescriptor, wdata, cx());
             } else {
-                sysdata = SysWrite(e, fileDescriptor, dsdxparms(false, cx()), cx());
+                sysdata = sysWrite(fileDescriptor, dsdxparms(false, cx()), cx());
             }
             if (sysdata == (DWord)-1) {
                 setCF(true);
@@ -880,8 +873,8 @@ int handleSyscallDOS(struct exe *e, int intno)
             else {
                 DWORD winErr = GetLastError();
                 setCF(true);
-                setAX(dosError(errno));
-                if (f_verbose) fprintf(stderr, "  Delete: FAILED win32err=%lu errno=%d\n", winErr, errno);
+                setAX(winErr == ERROR_ACCESS_DENIED ? 5 : 2);
+                if (f_verbose) fprintf(stderr, "  Delete: FAILED win32err=%lu\n", winErr);
             }
         }
             break;
@@ -1103,7 +1096,7 @@ int handleSyscallDOS(struct exe *e, int intno)
             break;
 
         case 0x214c:    /* Terminate with return code */
-            sysExit(e, al());
+            sysExit(al());
             break;
 
         case 0x214d:    /* Get return code */

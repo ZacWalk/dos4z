@@ -19,7 +19,6 @@
 #include "exe.h"
 #include "exec-dos.h"
 
-extern int f_verbose;
 extern char demuExePath[MAX_PATH];
 static int f_dump;
 int f_shell;  /* running a command shell (COMMAND.COM) */
@@ -317,13 +316,14 @@ int main(int argc, char *argv[])
        This lets us run native replacements directly from the command line,
        not just when called as a child process from within a DOS program. */
     {
-        char cmdTail[512] = "";
+        char cmdTail[512];
         int pos = 0;
-        for (int a = argstart + 1; a < argc; a++) {
+        for (int a = argstart + 1; a < argc && pos < (int)sizeof(cmdTail) - 1; a++) {
             if (pos > 0) cmdTail[pos++] = ' ';
-            int n = _snprintf(cmdTail + pos, sizeof(cmdTail) - pos, "%s", argv[a]);
-            if (n > 0) pos += n;
+            for (const char *s = argv[a]; *s && pos < (int)sizeof(cmdTail) - 1; s++)
+                cmdTail[pos++] = *s;
         }
+        cmdTail[pos] = '\0';
         int rc = runNativeCommand(argv[argstart], cmdTail);
         if (rc >= 0)
             return rc;

@@ -99,10 +99,6 @@ static void write_le32(unsigned char *p, unsigned long v) {
     p[3] = (unsigned char)((v >> 24) & 0xFF);
 }
 
-static unsigned int read_le16(const unsigned char *p) {
-    return p[0] | ((unsigned int)p[1] << 8);
-}
-
 /* Get a FAT12 entry */
 static unsigned int fat12_get(unsigned int cluster) {
     unsigned char *fat = disk + geo->fat_start * SECTOR_SIZE;

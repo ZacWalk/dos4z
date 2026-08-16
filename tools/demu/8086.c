@@ -14,8 +14,6 @@
 #include "8086.h"
 #include "exe.h"
 
-typedef int bool;
-
 /* emulator globals */
 Word registers[12];
 Byte* byteRegisters[8];

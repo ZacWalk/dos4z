@@ -12,7 +12,7 @@
 #include <ctype.h>
 #include <windows.h>
 
-extern int f_verbose;
+#include "8086.h"
 
 /* ── OMF constants ─────────────────────────────────────────────────── */
 #define LIB_HEADER  0xF0

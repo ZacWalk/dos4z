@@ -14,16 +14,7 @@
 #include "exe.h"
 #include "exec-dos.h"
 
-extern int f_verbose;
-extern Word loadSegment;
-extern Byte shadowRam[];
-
-/* lib-omf.c */
-extern int nativeLib(const char *args);
-
-/* Forward declarations */
 static void cmdBaseName(const char *prog, char *out, int outSz);
-int runNativeCommand(const char *cmdName, const char *args);
 
 /* ── In-process EXEC state ───────────────────────────────────────────── */
 #define EXEC_MAX_DEPTH 8
@@ -46,7 +37,7 @@ static int execDepth = 0;
 
 /* ── sysExit: terminate current program (or child if nested) ─────────── */
 
-int sysExit(struct exe *e, int rc)
+int sysExit(int rc)
 {
     if (f_verbose)
         fprintf(stderr, "EXIT %d (depth %d)\n", rc, execDepth);
@@ -55,7 +46,6 @@ int sysExit(struct exe *e, int rc)
         longjmp(execStack[execDepth - 1].jmpEnv, rc + 1);
     }
     exit(rc);
-    return -1;
 }
 
 /* ── PATH search ─────────────────────────────────────────────────────── */
@@ -689,11 +679,9 @@ static int cmdCopy(const char *args)
     char *p = buf;
     while (*p == ' ') p++;
 
-    /* Check for /b flag (binary mode — we always copy binary) */
-    int binaryFlag = 0;
+    /* Skip mode flags — we always copy binary */
     while (_strnicmp(p, "/b", 2) == 0 || _strnicmp(p, "/a", 2) == 0 ||
            _strnicmp(p, "/v", 2) == 0 || _strnicmp(p, "/y", 2) == 0) {
-        if (_strnicmp(p, "/b", 2) == 0) binaryFlag = 1;
         p += 2;
         while (*p == ' ') p++;
     }
@@ -1089,7 +1077,7 @@ static struct { const char *name; nativeCmdFn fn; } nativeCommands[] = {
     { "attrib",  cmdAttrib },
     { "cls",     cmdCls    },
     { "ver",     cmdVer    },
-    { "lib",     (nativeCmdFn)nativeLib },
+    { "lib",     nativeLib },
     { "path",    cmdSet    },   /* PATH x  ≈  SET PATH=x */
     { "break",   cmdNoop   },
     { "verify",  cmdNoop   },
@@ -1119,15 +1107,6 @@ int runNativeCommand(const char *cmdName, const char *args)
             return nativeCommands[i].fn(args);
     }
     return -1;  /* not a native command */
-}
-
-static int isNativeCommand(const char *prog)
-{
-    char name[64];
-    cmdBaseName(prog, name, sizeof(name));
-    for (int i = 0; nativeCommands[i].name; i++)
-        if (_stricmp(name, nativeCommands[i].name) == 0) return 1;
-    return 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

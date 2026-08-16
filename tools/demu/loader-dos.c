@@ -10,7 +10,6 @@
 #include "8086.h"
 #include "exe.h"
 
-extern int f_verbose;
 extern int f_shell;
 Word loadSegment;
 

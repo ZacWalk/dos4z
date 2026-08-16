@@ -3,6 +3,7 @@
 #define EXE_H
 
 #include <stdint.h>
+#include "8086.h"
 
 struct image_dos_header {       /* DOS .EXE header */
     uint16_t e_magic;           /* Magic number                  0x00 */
@@ -34,20 +35,13 @@ struct dos_reloc {              /* DOS relocation table entry */
 #define DOSMAGIC    0x5a4d      /* 'MZ' magic number for DOS MZ executables */
 
 struct exe {
-    struct image_dos_header dos;
     int (*checkStack)(struct exe *e);
     int (*handleSyscall)(struct exe *e, int intno);
-    /* break management */
-    uint16_t t_endseg;          /* end of data segment */
-    uint16_t t_begstack;        /* start SP */
-    uint16_t t_minstack;        /* min stack size */
-    uint16_t t_enddata;         /* start heap = end of data+bss */
-    uint16_t t_endbrk;          /* current break (end of heap) */
-    /* stack overflow check */
-    uint32_t t_stackLow;        /* lowest SS:SP allowed */
+    uint32_t t_stackLow;        /* lowest SS:SP allowed, 0 = no guard */
 };
 
 /* loader entry point */
 void loadExecutableDOS(struct exe *e, const char *filename, int argc, char **argv);
+extern Word loadSegment;        /* segment the image was loaded at */
 
 #endif /* EXE_H */

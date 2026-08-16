@@ -24,6 +24,8 @@ enum { ES = 0, CS, SS, DS };
 extern Word registers[12];
 extern Byte* byteRegisters[8];
 extern Byte ram[RAMSIZE];
+extern Byte shadowRam[RAMSIZE];  /* per-byte fRead/fWrite access flags */
+extern int f_verbose;
 
 /* emulator operation */
 struct exe;                     /* defined in exe.h */
