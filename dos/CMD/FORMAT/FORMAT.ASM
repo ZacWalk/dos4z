@@ -324,7 +324,9 @@ fBigFat db	FALSE
 firstHead dw	?
 firstCylinder dw ?
 tracksLeft dw	?
-tracksPerDisk dw ?
+tracksLeftHigh dw 0			; track counts are 32-bit: a 2 GB
+tracksPerDisk dw ?			;  partition with 255 heads has over
+tracksPerDiskHigh dw 0			;  65535 tracks
 
 Formatted_Tracks_Low dw 0
 Formatted_Tracks_High dw 0
@@ -2125,15 +2127,27 @@ SetfBigFat endp
 ;
 Phase2Initialisation proc near
 
+	push	si
 ; Calculate first track/head to format (round up - kludge)
+; The track number needs 32 bits once the partition starts more than
+; 65535 tracks into the disk (about 2 GB with 63 sectors per track).
 	mov	ax, deviceParameters.DP_BPB.BPB_HiddenSectors
 	mov	dx, deviceParameters.DP_BPB.BPB_HiddenSectors + 2
 	add	ax, deviceParameters.DP_BPB.BPB_SectorsPerTrack
 	adc	dx, 0
-	dec	ax
+	sub	ax, 1
 	sbb	dx, 0
-	div	deviceParameters.DP_BPB.BPB_SectorsPerTrack
-	xor	dx,dx
+	mov	si, dx
+	mov	di, ax
+	mov	cx, deviceParameters.DP_BPB.BPB_SectorsPerTrack
+	call	Divide_32_Bits			; SI:DI = first track
+	mov	dx, si
+	mov	ax, di
+	cmp	dx, deviceParameters.DP_BPB.BPB_Heads ; cylinder past 65535 cannot
+	jb	FirstCylinderOk 		;  be put in an IOCTL packet
+	Message msgParametersNotSupported
+	jmp	Fexit
+FirstCylinderOk:
 	div	deviceParameters.DP_BPB.BPB_Heads
 	mov	firstCylinder, ax
 	mov	firstHead, dx
@@ -2148,8 +2162,12 @@ Phase2Initialisation proc near
 	mov	dx, deviceParameters.DP_BPB.BPB_BigTotalSectors + 2
 
 NotBigTotalSectors:
-	div	deviceParameters.DP_BPB.BPB_SectorsPerTrack
-	mov	tracksPerDisk, ax
+	mov	si, dx
+	mov	di, ax
+	mov	cx, deviceParameters.DP_BPB.BPB_SectorsPerTrack
+	call	Divide_32_Bits
+	mov	tracksPerDisk, di
+	mov	tracksPerDiskHigh, si
 
 ; Initialise the directory buffer
 ; Clear out the Directory Sector before any information is inserted.
@@ -2175,6 +2193,7 @@ StickE5:
 	add	bx, size dir_entry
 	loop	stickE5
 
+	pop	si
 	ret
 
 Phase2Initialisation endp
@@ -2352,6 +2371,8 @@ StdBPB:
 	mov	formatPacket.FP_Cylinder, ax
 	mov	cx, tracksPerDisk
 	mov	tracksLeft, cx
+	mov	cx, tracksPerDiskHigh
+	mov	tracksLeftHigh, cx
 	mov	Format_End,False						;an015; dms;flag not at end of format
 	call	Calc_Max_Tracks_To_Format					;an015; dms;max track count for FormatTrack call
 FormatLoop:
@@ -2537,7 +2558,18 @@ DisplayCurrentTrack proc near
 	mov	cx,100				;Make integer calc for div	;AN000;
 	call	Multiply_32_Bits		; BX:AX = (Cyl * Head *100)	;AN000;
 	mov	dx,bx				;Set up divide			;AN000;
-	div	TracksPerDisk			;% = (Cyl * Head *100)/ # tracks;AN000;
+	mov	cx,TracksPerDisk		; with 65536 or more tracks,
+	mov	bx,TracksPerDiskHigh		;  halve both sides until the
+ScalePercent:					;  divisor fits in 16 bits
+	or	bx,bx
+	jz	DividePercent
+	shr	bx,1
+	rcr	cx,1
+	shr	dx,1
+	rcr	ax,1
+	jmp	short ScalePercent
+DividePercent:
+	div	cx				;% = (Cyl * Head *100)/ # tracks;AN000;
 	cmp	ax,PercentComplete		;Only print message when change ;AN000;
 ;	$IF	NE				;To avoid excess cursor splat	;AN000;
 	JE $$IF54
@@ -2862,16 +2894,20 @@ CurrentLogicalSector proc near
 
 	push	ax								;an000; dms;save regs
 	push	bx								;an000; dms;
+	push	cx
 	push	dx								;an000; dms;
 
 	mov	ax, tracksPerDisk
+	mov	bx, tracksPerDiskHigh
 	sub	ax, tracksLeft
-	xor	dx,dx								;an000; dms;clear dx
-	mul	deviceParameters.DP_BPB.BPB_SectorsPerTrack
-	mov	word ptr Relative_Sector_High,dx				;an000; dms;save high word of sector #
+	sbb	bx, tracksLeftHigh		; BX:AX = current track
+	mov	cx, deviceParameters.DP_BPB.BPB_SectorsPerTrack
+	call	Multiply_32_Bits		; BX:AX = its first sector
+	mov	word ptr Relative_Sector_High,bx				;an000; dms;save high word of sector #
 	mov	word ptr Relative_Sector_Low,ax 				;an000; dms;save low word of sector #
 
 	pop	dx								;an000; dms;restore regs
+	pop	cx
 	pop	bx								;an000; dms;
 	pop	ax								;an000; dms;
 
@@ -4119,7 +4155,7 @@ BadClus_Address_Adjust	endp							;an000; dms;
 Procedure NextTrack								;an015; dms;
 
 
-	cmp	TracksLeft,00							;an015; dms;end of format?
+	call	Tracks_Left_Zero						;an015; dms;end of format?
 ;	$if	e								;an015; dms;yes
 	JNE $$IF149
 		stc								;an015; dms;signal end of format
@@ -4130,7 +4166,7 @@ $$IF149:
 		mov	cx,Tracks_To_Format					;an015; dms;get max track count for call
 ;		$do								;an015; dms;while tracks remain
 $$DO151:
-			cmp	TracksLeft,00					;an015; dms;end of format?
+			call	Tracks_Left_Zero				;an015; dms;end of format?
 ;			$leave	e						;an015; dms;yes
 			JE $$EN151
 			cmp	cx,00						;an015; dms;end of head/cyl. adjustment?
@@ -4158,6 +4194,15 @@ $$EN149:
 	ret									;an015; dms;
 
 NextTrack	endp								;an015; dms;
+
+; ZF set when no tracks are left (TracksLeft is 32-bit); registers kept
+Procedure Tracks_Left_Zero
+	push	ax
+	mov	ax,TracksLeft
+	or	ax,TracksLeftHigh
+	pop	ax
+	ret
+Tracks_Left_Zero endp
 
 ;=========================================================================
 ; Determine_Format_Type : This routine determines the type of format
@@ -4283,6 +4328,8 @@ Procedure Calc_Track_Count							;an015; dms;
 
 	push	ax								;an015; dms;save regs
 	mov	ax,Track_Count							;an015; dms;max bytes to format
+	cmp	TracksLeftHigh,0						; 65536+ tracks left: the
+	jne	$$IF166 							;  max count is smaller
 	cmp	ax,TracksLeft							;an015; dms;too many tracks?
 ;	$if	a								;an015; dms;yes
 	JNA $$IF166
@@ -4459,6 +4506,7 @@ Procedure Adj_Track_Count							;an015; dms;
 	mov	ax,TracksLeft							;an015; dms; get tracks remaining
 	sub	ax,Tracks_To_Format						;an015; dms; subtract amount formatted
 	mov	TracksLeft,ax							;an015; dms; save new tracks remaining value
+	sbb	TracksLeftHigh,0						; (MOV keeps the borrow)
 	pop	ax								;an015; dms; restore regs
 	ret									;an015; dms;
 

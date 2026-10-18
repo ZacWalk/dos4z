@@ -1,4 +1,4 @@
-0148
+0150
 COMMON   0006 0038
 0001 U 0000 "Incorrect DOS version",CR,LF
 0002 U 0000 "%1 already installed",CR,LF
@@ -791,8 +791,8 @@ TREE     854f 0004
 0002 U 0000 "Directory PATH listing for Volume %1",CR,LF
 0003 U 0000 "Directory PATH listing",CR,LF
 0004 U 0000 "No sub-directories exist",CR,LF,LF
-0007 U 0000 "ï¿½ï¿½Ã³"
-REPLACE  8612 0009
+0007 U 0000 "ÀÄÃ³"
+REPLACE  860e 0009
 0003 U 0000 CR,LF,"No files replaced",CR,LF
 0004 U 0000 CR,LF,"No files added",CR,LF
 0013 U 0000 CR,LF,"Replacing %1",CR,LF
@@ -802,7 +802,7 @@ REPLACE  8612 0009
 0017 U 0000 CR,LF,"No files found - %1",CR,LF
 0022 U 0000 CR,LF,"Replace %1? (Y/N)"
 0023 U 0000 CR,LF,"Add %1? (Y/N)"
-XCOPY    879e 0018
+XCOPY    879a 0018
 0004 U 0000 "Does %1 specify a file name",CR,LF
 	"or directory name on the target",CR,LF
 	"(F = file, D = directory)?"
@@ -823,7 +823,7 @@ XCOPY    879e 0018
 0032 U 0000 "%1",CR,LF
 0033 U 0000 "%1%2 (Y/N)?"
 0034 U 0000 "%1\%2 (Y/N)?"
-VDISK    8aaa 0013
+VDISK    8aa6 0013
 0002 U 0000 "Insufficient memory",CR,LF
 0003 U 0000 "MS-DOS Version 4.0z, VDISK virtual disk %1",CR,LF
 0004 U 0000 "   Buffer size adjusted",CR,LF
@@ -838,7 +838,7 @@ VDISK    8aaa 0013
 0013 U 0000 "VDISK not installed - "
 0014 U 0000 "   Extender Card switches",CR,LF
 	"do not match system memory size",CR,LF,CR,LF
-GRAFTABL 8d50 0009
+GRAFTABL 8d4c 0009
 0002 U 0000 "Active Code Page: %1",CR,LF
 0003 U 0000 "Previous Code Page: %1",CR,LF
 0004 U 0000 "None",NULL
@@ -852,7 +852,7 @@ GRAFTABL 8d50 0009
 	"    860  - Portuguese Graphic Character Set",CR,LF
 0010 U 0002 "    863  - Canadian French Graphic Character Set",CR,LF
 	"    865  - Nordic Graphic Character Set",CR,LF
-FASTOPEN 9005 0016
+FASTOPEN 9001 0016
 0004 U 0000 CR,LF,"FASTOPEN installed",CR,LF
 0005 U 0000 CR,LF,"FASTOPEN already installed",CR,LF
 0006 U 0000 CR,LF,"Incorrect parameter",CR,LF
@@ -869,7 +869,7 @@ FASTOPEN 9005 0016
 0017 U 0000 CR,LF,"Cannot use FASTOPEN for drive %1",CR,LF
 0018 U 0000 CR,LF,"Too many extent entries",CR,LF
 0019 U 0000 CR,LF,"Too many file/directory entries",CR,LF
-APPEND   9387 0009
+APPEND   9383 0009
 0001 U 0000 "Incorrect APPEND version",CR,LF
 0002 U 0000 "Invalid path",CR,LF
 0003 U 0000 "Invalid parameter",CR,LF
@@ -879,7 +879,7 @@ APPEND   9387 0009
 0007 U 0000 "APPEND / TopView Conflict",CR,LF
 0008 U 0000 "Incorrect DOS version",CR,LF
 0009 U 0000 "APPEND already installed",CR,LF
-GRAPHICS 951e 0012
+GRAPHICS 951a 0012
 0005 U 0000 "Invalid parameter:  %1",CR,LF
 0007 U 0000 "Duplicate parameters not allowed",CR,LF
 0009 U 0000 "Cannot find GRAPHICS profile",CR,LF
@@ -892,14 +892,14 @@ GRAPHICS 951e 0012
 0016 U 0000 "Printer type not in GRAPHICS profile",CR,LF
 0017 U 0000 "/B invalid with a black and white printer",CR,LF
 0018 U 0000 "Unable to reload with profile supplied",CR,LF
-DISPLAY  97e2 0003
+DISPLAY  97de 0003
 0002 U 0000 "%1 code page driver cannot be initialized",CR,LF,BELL
 0008 U 0000 "Insufficient memory",CR,LF,BELL
 0012 U 0000 "Invalid syntax on DISPLAY.SYS code page driver",CR,LF,BELL
-PRINTER  98b1 0002
+PRINTER  98ad 0002
 0002 U 0000 "%1 code page driver cannot be initialized",CR,LF,BELL
 0012 U 0000 "Invalid syntax on PRINTER.SYS code page driver",CR,LF,BELL
-KEYB     9952 0016
+KEYB     994e 0016
 0002 U 0000 "Current keyboard code: %1"
 0003 U 0000 "Current keyboard ID: %1"
 0004 U 0000 "  code page: %1",CR,LF
@@ -916,13 +916,13 @@ KEYB     9952 0016
 0015 U 0000 "Code page specified is inconsistent with the selected code page",CR,LF
 0016 U 0001 "Keyboard ID specified is inconsistent with the selected keyboard layout",CR,LF
 0017 U 0000 "Unable to create KEYB table in resident memory",CR,LF
-REDIRSYS 9d2d 0000
-MEM      9d41 0042
+REDIRSYS 9d29 0000
+MEM      9d3d 0042
 0010 U 0000  CR,LF
 0011 U 0000  "  Address     Name          Size       Type ",CR,LF
-0012 U 0000  "  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½     ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½     ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½     ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½",CR,LF
+0012 U 0000  "  ÄÄÄÄÄÄÄ     ÄÄÄÄÄÄÄÄ     ÄÄÄÄÄÄ     ÄÄÄÄÄÄ",CR,LF
 0013 U 0000  "  Handle      EMS Name      Size   ",CR,LF
-0014 U 0000  "  ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½     ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½     ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½  ",CR,LF
+0014 U 0000  "  ÄÄÄÄÄÄÄ     ÄÄÄÄÄÄÄÄ     ÄÄÄÄÄÄ  ",CR,LF
 0015 U 0000  "  %1      %2     %3     %4",CR,LF
 0016 U 0000  "                %1   %2      %3 ",CR,LF
 0017 U 0000  "                  %1              %2 ",CR,LF
@@ -960,7 +960,7 @@ MEM      9d41 0042
 0049 U 0000  "Program",0
 0050 U 0000  "Environment",0
 0051 U 0000  "Data",0
-REDIR    a3df 0029
+REDIR    a37b 0029
 0004 U 0000 "Network has not been started",CR,LF
 0050 U 0000 "NET809: Network request not supported",CR,LF,0
 0051 U 0000 "NET801: Remote computer not listening",CR,LF,0
@@ -990,7 +990,7 @@ REDIR    a3df 0029
 0084 U 0004 "NET819: Network name limit exceeded",CR,LF,0
 0085 U 0004 "NET802: Duplicate name on network",CR,LF,0
 0088 U 0000 "NET825: Network data fault",CR,LF,0
-XMA2EMS  aa5d 0030
+XMA2EMS  a9f9 0030
 0001 U 0000 CR,LF,"$"
 0002 U 0000 "XMA2EMS: Expanded Memory Manager",CR,LF
 	"(c)Copyright Microsoft Corporation 1988                     All rights reserved",CR,LF,"$"
@@ -1022,7 +1022,7 @@ XMA2EMS  aa5d 0030
 0028 U 0000 "    "," KB OK","$"
 0029 U 0000 "     ",CR,LF,"$"
 0030 U 0000 "$"
-FILESYS  b0a4 0007
+FILESYS  b040 0007
 0010 U 0003  "  PAUSED  %1   %2   %3",CR,LF
 0011 U 0001  "          %1   %2   %3",CR,LF
 0012 U 0001  "          Local   IFS",CR,LF
@@ -1030,7 +1030,7 @@ FILESYS  b0a4 0007
 0014 U 0001  "  ______  ______  _________   ___________________",CR,LF,CR,LF
 0015 U 0003  "No entries found",CR,LF
 0016 U 0003  "  ERROR   %1   %2   %3",CR,LF
-FDISK    b21f 0122
+FDISK    b1bb 0122
 0004 U 0000 "Cannot FDISK with network loaded",CR,LF
 0005 U 0000 "No fixed disks present",CR,LF
 0006 U 0000 "Error reading fixed disk",CR,LF
@@ -1153,7 +1153,7 @@ FDISK    b21f 0122
 1114 U 0001 "Invalid partition table",0
 1115 U 0001 "Error loading operating system",0
 1116 U 0001 "Missing operating system",0
-XMAEM    ce1e 0006
+XMAEM    cdba 0006
 0001 U 0000 "80386 XMA Emulator Version 1.10",CR,LF
 	"         (C) Copyright IBM Corporation 1987, 1988  All rights reserved",CR,LF,CR,LF,"$"
 0002 U 0000 "80386 XMA Emulator installed",CR,LF,"$"
@@ -1165,7 +1165,7 @@ XMAEM    ce1e 0006
 	"     Parameter value must specify 64 pages or greater",CR,LF,"$"
 0006 U 0000 "80386 XMA Emulator not installed",CR,LF
 	"     Insufficient memory for requested parameter value",CR,LF,"$"
-UPDATE   d0d7 0013
+UPDATE   d073 0013
 0100 U 0000 CR,LF,"- Enter your keyboard code: "
 0110 U 0000 "US"                    ;DEFAULT KEYBOARD CODE
 0120 U 0000 CR,LF,"- Enter the drive which contains files to be",CR,LF

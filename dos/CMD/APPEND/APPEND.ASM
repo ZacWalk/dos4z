@@ -109,41 +109,7 @@ DPL_XID 	DW	0		;RESERVED
 DPL_UID 	DW	0		;SERVER USER ID
 DPL_PID 	DW	0		;REDIRECTOR PROCESS ID
 DPL		ENDS
-;include sysmac.lib
-;
-; jump - long conditional jump macro (originally from sysmac.lib)
-;
-jump    macro   cond,target
-        local   skip
-        ifidn   <cond>,<NE>
-        je      skip
-        else
-        ifidn   <cond>,<E>
-        jne     skip
-        else
-        jn&cond skip
-        endif
-        endif
-        jmp     target
-skip:
-        endm
-;
-; comp - compare string at ES:DI with src (originally from sysmac.lib)
-;
-comp    macro   dest,cnt,src
-        mov     si,offset src
-        mov     cx,cnt
-        repe    cmpsb
-        endm
-;
-; move - copy bytes from src to ES:DI (originally from sysmac.lib)
-;
-move    macro   dest,cnt,src
-        mov     si,offset src
-        mov     cx,cnt
-        rep     movsb
-        endm
-;
+include sysmac.lib
 include versiona.inc
 include appendp.inc			; parseing stuff for append			 ;AN004;
 .list

@@ -54,14 +54,13 @@ unsigned long   divide_by;                                              /* AN000
                END
            else
                BEGIN
-               number_of_sectors = ul(((mbytes_in * ONE_MEG)/BYTES_PER_SECTOR)); /* AN000 */
-               if (((int)(mbytes_in * ONE_MEG) % BYTES_PER_SECTOR) != (int)0)    /* AN000 */
-                 number_of_sectors++;                                            /* AN000 */
+               /* Work in sectors: MB * ONE_MEG overflows a long from 2048 MB */
+               number_of_sectors = ul(mbytes_in) * ul(ONE_MEG / BYTES_PER_SECTOR);
                number_of_tracks = ul((number_of_sectors / max_sector[which_disk]));  /* AN004 */
-               if (((int)number_of_sectors % max_sector[which_disk]) != (int)0)  /* AN004 */
+               if ((number_of_sectors % max_sector[which_disk]) != ul(0))
                   number_of_tracks++;                                            /* AN000 */
                cylinders_out = u((number_of_tracks / max_head[which_disk]));     /* AN004 */
-               if (((int)number_of_tracks % max_head[which_disk]) != (int)0)     /* AN004 */
+               if ((number_of_tracks % max_head[which_disk]) != ul(0))
                   cylinders_out++;                                          /* AN000 */
                END
 
@@ -100,17 +99,13 @@ char            which_disk;                                             /* AN004
 BEGIN                                                                   /* AN000 */
 
 unsigned         mbytes_out;                                            /* AN000 */
-unsigned long    number_of_bytes;                                       /* AN000 */
 unsigned long    number_of_sectors;                                     /* AN000 */
-unsigned long    number_of_tracks;                                      /* AN000 */
-unsigned long    bytes_in_one_sector;                                   /* AN004 */
 
-     bytes_in_one_sector = BYTES_PER_SECTOR;                            /* AN004 */
-     number_of_tracks = (ul(cylinders_in) * ul(max_head[which_disk]));  /* AN004 */
-     number_of_sectors = (number_of_tracks * ul(max_sector[which_disk])); /* AN004 */
-     number_of_bytes = (ul(number_of_sectors) * ul(bytes_in_one_sector)); /* AN004 */
-     mbytes_out =  f(number_of_bytes / ONE_MEG);                        /* AN000 */
-     if ((number_of_bytes % ONE_MEG) >= (ONE_MEG / 2)) mbytes_out++;    /* AN000 */
+     /* Count sectors, not bytes: a byte count wraps at 4 GB */
+     number_of_sectors = ul(cylinders_in) * ul(max_head[which_disk]) * ul(max_sector[which_disk]);
+     /* Round to the nearest megabyte */
+     mbytes_out = u((number_of_sectors + ul(ONE_MEG / BYTES_PER_SECTOR / 2)) /
+                    ul(ONE_MEG / BYTES_PER_SECTOR));
      return(mbytes_out);                                                /* AN000 */
 
 END                                                                     /* AN000 */
@@ -161,7 +156,8 @@ double        large_number;                                             /* AN000
          percentage_out = u(large_number / total_cylinders);            /* AN000 */
          END
      /* this should round up to the next percent if more than .5 percent */
-     if (((cylinders_in * 100) % total_cylinders) >= (total_cylinders / 2))
+     if (total_cylinders != 0 &&
+         ((ul(cylinders_in) * 100) % total_cylinders) >= (total_cylinders / 2))
        percentage_out++;                                                /* AN000 */
      if (percentage_out > u(100)) percentage_out = u(100);              /* AN000 */
      return(percentage_out);                                            /* AN000 */
@@ -206,7 +202,7 @@ BEGIN                                                                   /* AN000
 #else
         cylinders_out = (unsigned)((ul(percent_in) * ul(total_cylinders)) / 100);
 #endif
-        if (((percent_in * total_cylinders) % 100) != u(0))             /* AN000 */
+        if (((ul(percent_in) * ul(total_cylinders)) % 100) != ul(0))   /* AN000 */
            cylinders_out++;                                             /* AN000 */
         return(cylinders_out);                                          /* AN000 */
 END                                                                     /* AN000 */

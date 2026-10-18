@@ -32,6 +32,7 @@
 #define BACKSPACE 0x08
 #define ACTIVE    0x80
 #define DOS_MAX   65535                /* Allow exactly 32mb worth of partitions */
+#define FAT16_MAX_SECTORS 4192256L     /* Largest DOS partition: 2047 MB (FAT16 with 32K clusters) */
 #define SYSTEM_FILE_SECTORS 250
 #define BYTES_PER_SECTOR 512                                            /* AN000 */
 

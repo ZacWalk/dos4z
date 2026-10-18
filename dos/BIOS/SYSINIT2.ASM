@@ -523,6 +523,9 @@ Org_file:				;AN000; Get the filename and put 0 at end,
 	call	Get2			;AN000; Not a comment
 	call	Delim			;AN000;
 	jz	Org_file		;AN000; Skip the possible delimeters
+	cmp	al, ' '			; control char instead of a filename?
+	jb	Org_No_File		;  (kept short: jz Org_Put_Zero above)
+Org_Store_First:
 	stosb				;AN000; copy the first non delim char found in buffer
 Org_Copy_File:				;AN000;
 	call	Skip_Comment		;AN000; comment char in the filename?
@@ -582,6 +585,17 @@ End_Copy_File:				;AN000;
 	cmp	al, LF			;AN000;
 	je	End_Commd_Line_brdg	;AN000;
 	jmp	Org5			;AN000;
+
+Org_No_File:				; "DEVICE=" etc. with no filename: the
+	cmp	al, CR			;  CR used to be stored as the name, and
+	je	Org_Unget_EOL		;  with a bare LF the next line was
+	cmp	al, LF			;  swallowed. Unget it so Org_Copy_File
+	je	Org_Unget_EOL		;  ends the line: indicator, 0, LF
+	jmp	Org_Store_First		; other control chars: as before
+Org_Unget_EOL:
+	dec	si
+	inc	cx
+	jmp	Org_Copy_File
 
 Org4:					;AN000; Org4 skips all delimiters after the command name except for '/'
 	call	Skip_Comment		;AN000;

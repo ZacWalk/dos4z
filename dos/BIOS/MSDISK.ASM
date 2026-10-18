@@ -181,6 +181,29 @@ Start_Sec_H	dw	0		;AN000; Starting sector number high word.
 					;Used as an input to DISKIO subroutine.
 Saved_Word	dw	0		;AN000;  Tempory saving place for a word.
 
+;---------------------------------------------------------------------
+; Large disk support: fixed disks whose BIOS provides the INT 13h
+; extensions are accessed by absolute (LBA) sector number with functions
+; 42h/43h/44h instead of cylinder/head/sector.  MSINIT sets bit n of
+; LBA_Drives when unit 80h+n passes the INT 13h AH=41h check.
+	public	LBA_Drives
+LBA_Drives	db	0
+	public	LBA_Func, LBA_Lo, LBA_Hi, LBA_Left
+LBA_Func	db	0		; ROMREAD, ROMWRITE or ROMVERIFY
+LBA_Lo		dw	0		; first absolute sector to transfer
+LBA_Hi		dw	0
+LBA_Left	dw	0		; number of sectors to transfer
+	EVENB
+LBA_DAP 	db	16		; INT 13h extensions disk address packet
+		db	0
+LBA_DAP_Cnt	dw	0
+LBA_DAP_Off	dw	0
+LBA_DAP_Seg	dw	0
+LBA_DAP_Lo	dw	0
+LBA_DAP_Hi	dw	0
+		dw	0,0
+;---------------------------------------------------------------------
+
 ;---------------------------------------
 ;J.K. 6/29/87 For Multi-track
 MULTRK_ON	EQU	10000000B	;User spcified Mutitrack=on, or System turns
@@ -566,7 +589,8 @@ HAS1:
 	MOV	BYTE PTR DS:[DI].MEDIAD,AH
 	MOV	BYTE PTR DS:[DI].CSECFAT,AL
 	MOV	BYTE PTR DS:[DI].SECLIM,BL
-	MOV	BYTE PTR DS:[DI].HDLIM,DL
+	XOR	DH,DH			; HDLIM IS A WORD: CLEAR ITS HIGH BYTE
+	MOV	WORD PTR DS:[DI].HDLIM,DX
 ;SB34DISK001*******************************************************************
 ;SB	the HIDSEC_H field and DRVLIM_L field and the 
 ;SB	DRVLIM_H fields need to be set to 0 since this code here is for floppies
@@ -1226,6 +1250,18 @@ DISKIO_PATCH:				;|
 ; NOW THE SETTLE VALUES ARE CORRECT FOR THE FOLLOWING CODE
 ;
 SKIP_SETUP:
+	call	Is_LBA_Drive		; INT 13h extensions on this fixed disk?
+	jz	DiskRd_CHS
+	mov	ax, cs:[Saved_Word]	; DX:AX = absolute first sector
+	mov	cs:[LBA_Lo], ax
+	mov	cs:[LBA_Hi], dx
+	mov	ax, cs:[SECCNT]
+	mov	cs:[LBA_Left], ax
+	mov	al, cs:[RFLAG]
+	mov	cs:[LBA_Func], al
+	jmp	LBA_RW			; returns to our caller
+
+DiskRd_CHS:
 ;J.K. 32 bit sector calculation.
 ; DX;[Saved_Word] = starting sector number.
 	mov	ax,dx			;AN000;
@@ -1250,7 +1286,7 @@ SKIP_SETUP:
 	cmp	cs:[Temp_H],0		;AN000;
 	ja	BADDRIVE_brdg		;AN000;
 	cmp	AX, 1024		;AN000; 2**10 currently maxium for track #.
-	ja	BADDRIVE_brdg		;AN000;
+	jae	BADDRIVE_brdg		; cylinder 1024 would wrap to 0
 	MOV	CS:[CURHD],DL		;SAVE CURRENT HEAD
 	MOV	CS:[CURTRK],AX		;SAVE CURRENT TRACK
 
@@ -1268,6 +1304,203 @@ DISKRD	ENDP
 ;
 BADDRIVE_Brdg:jmp Baddrive
 ;
+
+;---------------------------------------------------------------------
+; Is_LBA_Drive: NZ if the BDS at DS:DI is a fixed disk that is accessed
+; through the INT 13h extensions.  All registers are preserved.
+;---------------------------------------------------------------------
+	PUBLIC	Is_LBA_Drive
+Is_LBA_Drive PROC NEAR
+	test	word ptr [di].FLAGS, FNON_REMOVABLE
+	jz	Is_LBA_Ret
+	push	ax
+	push	cx
+	mov	cl, [di].DRIVENUM
+	and	cl, 7
+	mov	al, 1
+	shl	al, cl
+	test	cs:[LBA_Drives], al
+	pop	cx
+	pop	ax
+Is_LBA_Ret:
+	ret
+Is_LBA_Drive ENDP
+
+;---------------------------------------------------------------------
+; LBA_RW: transfer LBA_Left sectors at absolute sector LBA_Hi:LBA_Lo of
+; the fixed disk whose BDS is at DS:DI, to or from ES:BX, with retries
+; and the optional verify after write.  DISKRD jumps here, so we return
+; to its caller: CF clear on success, otherwise CF set, AL = error code
+; and CX = number of sectors not transferred.
+;---------------------------------------------------------------------
+LBA_RW	PROC	NEAR
+	mov	ah, 80h 		; partition rejected at init time:
+	test	byte ptr [di].FATSIZ, FTOOBIG ;  report not ready, like the
+	jnz	LBA_RW_Fail		;  CHS path does in FASTSPEED
+	mov	bp, MAXERR
+LBA_RW_Retry:
+	call	LBA_Xfer
+	jc	LBA_RW_Err
+	cmp	cs:[WRTVERIFY], 103h	; write with verify?
+	jne	LBA_RW_OK
+	mov	cs:[LBA_Func], ROMVERIFY
+	call	LBA_Xfer
+	mov	cs:[LBA_Func], ROMWRITE
+	jnc	LBA_RW_OK
+	cmp	ah, 1			; BIOS has no extended verify:
+	je	LBA_RW_OK		;  accept the completed write
+LBA_RW_Err:
+	push	dx
+	mov	dl, [di].DRIVENUM
+	call	AGAIN			; reset the drive, BP = BP - 1
+	pop	dx
+	jnz	LBA_RW_Retry
+LBA_RW_Fail:
+	call	MAPERROR		; AL = DOS error code, CF set
+	mov	cx, cs:[SECCNT]
+	mov	sp, cs:[SPSAV]
+	ret
+LBA_RW_OK:
+	clc
+	ret
+LBA_RW	ENDP
+
+;---------------------------------------------------------------------
+; LBA_Xfer: one attempt at transferring LBA_Left sectors starting at
+; absolute sector LBA_Hi:LBA_Lo with INT 13h function 42h, 43h or 44h
+; (LBA_Func = ROMREAD, ROMWRITE or ROMVERIFY).  ES:BX is the buffer and
+; DS:DI the BDS.  Requests are split so none is larger than 127 sectors
+; or crosses a 64K physical boundary; a sector that straddles such a
+; boundary is moved through DISKSECTOR.
+; Returns CF clear on success, else CF set and AH = INT 13h status.
+; All registers except AX are preserved.
+;---------------------------------------------------------------------
+	PUBLIC	LBA_Xfer
+LBA_Xfer PROC	NEAR
+	push	bx
+	push	cx
+	push	dx
+	push	si
+	push	ds
+	push	es
+	push	di
+	mov	dl, [di].DRIVENUM
+	mov	ax, bx			; normalise ES:BX so the offset is
+	mov	cl, 4			;  below 16 and no request can wrap
+	shr	ax, cl
+	mov	cx, es
+	add	ax, cx
+	and	bx, 0Fh
+	push	cs
+	pop	ds
+	ASSUME	DS:CODE
+	mov	[LBA_DAP_Seg], ax
+	mov	[LBA_DAP_Off], bx
+	mov	ax, [LBA_Lo]
+	mov	[LBA_DAP_Lo], ax
+	mov	ax, [LBA_Hi]
+	mov	[LBA_DAP_Hi], ax
+	mov	cx, [LBA_Left]		; CX = sectors to go
+LBAX_Next:
+	or	cx, cx
+	jnz	LBAX_More
+	jmp	LBAX_Done
+LBAX_More:
+	mov	ax, 127 		; largest request allowed by the spec
+	cmp	cx, ax
+	jae	LBAX_Bound
+	mov	ax, cx
+LBAX_Bound:
+	cmp	[LBA_Func], ROMVERIFY	; verify has no buffer
+	je	LBAX_Go
+	push	cx
+	mov	si, [LBA_DAP_Seg]	; SI = low 16 bits of the physical
+	mov	cl, 4			;  buffer address
+	shl	si, cl
+	add	si, [LBA_DAP_Off]
+	jz	LBAX_Fits		; on a 64K boundary: all of it fits
+	neg	si			; bytes left before the boundary
+	mov	cl, 9
+	shr	si, cl			; whole sectors left before it
+	jz	LBAX_Bounce		; the boundary is inside this sector
+	cmp	ax, si
+	jbe	LBAX_Fits
+	mov	ax, si
+LBAX_Fits:
+	pop	cx
+LBAX_Go:
+	mov	[LBA_DAP_Cnt], ax
+	push	ax
+	mov	ah, [LBA_Func]
+	add	ah, 40h 		; 42h read, 43h write, 44h verify
+	xor	al, al			; AL = 0: write without verify
+	mov	si, offset LBA_DAP
+	int	13h
+	pop	si			; SI = sectors in this request
+	jc	LBAX_Exit
+LBAX_Advance:
+	sub	cx, si
+	add	[LBA_DAP_Lo], si
+	adc	[LBA_DAP_Hi], 0
+	mov	ax, si			; a sector is 32 paragraphs
+	push	cx
+	mov	cl, 5
+	shl	ax, cl
+	pop	cx
+	add	[LBA_DAP_Seg], ax
+	jmp	LBAX_Next
+
+LBAX_Bounce:
+	pop	cx
+	les	di, dword ptr [LBA_DAP_Off] ; ES:DI = caller's buffer
+	push	es
+	push	di
+	mov	[LBA_DAP_Off], offset DISKSECTOR
+	mov	[LBA_DAP_Seg], cs
+	mov	[LBA_DAP_Cnt], 1
+	cmp	[LBA_Func], ROMWRITE
+	jne	LBAX_Bounce_IO
+	push	ds
+	push	es
+	pop	ds
+	mov	si, di			; DS:SI = caller's buffer
+	push	cs
+	pop	es
+	mov	di, offset DISKSECTOR
+	call	MOVE
+	pop	ds
+LBAX_Bounce_IO:
+	mov	ah, [LBA_Func]
+	add	ah, 40h
+	xor	al, al
+	mov	si, offset LBA_DAP
+	int	13h
+	pop	di
+	pop	es			; ES:DI = caller's buffer
+	jc	LBAX_Exit
+	mov	[LBA_DAP_Off], di
+	mov	[LBA_DAP_Seg], es
+	cmp	[LBA_Func], ROMREAD
+	jne	LBAX_Bounce_Done
+	mov	si, offset DISKSECTOR
+	call	MOVE			; DISKSECTOR -> caller's buffer
+LBAX_Bounce_Done:
+	mov	si, 1
+	jmp	LBAX_Advance
+
+LBAX_Done:
+	clc
+LBAX_Exit:
+	pop	di
+	pop	es
+	pop	ds
+	ASSUME	DS:NOTHING
+	pop	si
+	pop	dx
+	pop	cx
+	pop	bx
+	ret
+LBA_Xfer ENDP
 
 ; SET THE DRIVE-LAST-ACCESSED FLAG FOR DISKETTE ONLY.  WE KNOW THAT THE HARD
 ; DISK WILL NOT BE REMOVED.
@@ -1487,9 +1720,13 @@ ITS_REMOVABLE:
 	JBE	DISK_RET
 NEXTTRACK:
 	MOV	CS:[CURSEC],1		; START WITH FIRST SECTOR OF NEXT TRACK
-	MOV	DH,CS:[CURHD]
-	INC	DH
-	CMP	DH,BYTE PTR [DI].HDLIM
+	PUSH	AX
+	MOV	AL,CS:[CURHD]		; THE NEXT HEAD, AS A WORD: A DISK
+	XOR	AH,AH			;  CAN HAVE 256 HEADS, WHICH A BYTE
+	INC	AX			;  COMPARE WOULD TAKE FOR NONE
+	CMP	AX,[DI].HDLIM
+	MOV	DH,AL
+	POP	AX
 	JB	NOXOR
 	XOR	DH,DH
 	INC	CS:[CURTRK]		;NEXT TRACK
@@ -1650,6 +1887,8 @@ READY:
 	MESSAGE FTESTINIT,<",">
 	MNUM	FTESTINIT,DX
 	MESSAGE FTESTINIT,<">">
+	call	Is_LBA_Drive
+	jnz	FastSpeed_LBA
 	INT	13H
 DEATH:
 	RET
@@ -1657,6 +1896,41 @@ NOTREADY:
 	STC
 	MOV	AH,80H
 	JMP	DEATH
+
+; Fixed disk accessed through the INT 13h extensions: AH = ROM function,
+; AL = sector count and ES:BX = buffer as for INT 13h, but the address is
+; taken from CURTRK/CURHD/CURSEC (IOCTL track I/O and verify after write
+; reach here) and turned into an absolute sector.  CX and DX are kept.
+FastSpeed_LBA:
+	push	bx
+	push	cx
+	push	dx
+	mov	cs:[LBA_Func], ah
+	xor	ah, ah
+	mov	cs:[LBA_Left], ax
+	mov	ax, cs:[CURTRK]
+	mul	word ptr [di].HDLIM	; DX:AX = cylinder * heads
+	add	al, cs:[CURHD]
+	adc	ah, 0
+	adc	dx, 0			; DX:AX = track
+	mov	cx, ax
+	mov	ax, dx
+	mul	word ptr [di].SECLIM
+	mov	bx, ax
+	mov	ax, cx
+	mul	word ptr [di].SECLIM	; DX:AX = track * sectors per track
+	add	dx, bx
+	mov	cl, cs:[CURSEC]
+	xor	ch, ch
+	dec	cx			; sector numbers are 1-based
+	add	ax, cx
+	adc	dx, 0
+	mov	cs:[LBA_Lo], ax
+	mov	cs:[LBA_Hi], dx
+	pop	dx
+	pop	cx
+	pop	bx
+	jmp	LBA_Xfer
 FASTSPEED ENDP
 
 ; MAP ERROR RETURNED BY ROM IN AH INTO CORRESPONDING CODE TO BE RETURNED TO
@@ -1855,6 +2129,11 @@ ps2_30_Problem: 			;J.K. 1/30/87; ps2_30 = PS2 Model 30.
 ;
 GOTERR13:
 	PUSHF
+; Only the CHS read/write/verify/format functions are split for DMA and
+; ECC errors; INT 13h extension calls (42h and up) use a packet instead
+; of CX/DX/ES:BX, so their status goes straight back to the caller.
+	cmp	byte ptr cs:[PREVOPER+1], ROMFORMAT
+	ja	Skip_Ecc_Check
 	cmp	ah, 09h 		;AN011; DMA error?
 	je	Chk_ValidMedia_ERR13	;AN011;
 	cmp	ah, 11h 		;AN011; ECC error?

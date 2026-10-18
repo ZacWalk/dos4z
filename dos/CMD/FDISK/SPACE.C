@@ -183,8 +183,39 @@ unsigned    temp_size;
             /* Unless we're past the end of the free space */
             while ((temp != u(0)) && (free_space[last_found_partition].space != u(0)));    /* AC000 */
 
+        /* A primary DOS partition must still fit FAT16 */
+        if (type == c(PRIMARY))
+            limit_dos_space(last_found_partition);
+
         /* Return with the pointer to the largest free space */
         return(last_found_partition);
+END
+
+
+/*  */
+/* Shrink a free area to the largest DOS (FAT16) partition. FAT16 cannot  */
+/* address more than 2 GB, so on a large disk "use the maximum size" or */
+/* /PRI and /LOG with a big number would otherwise make an unusable one. */
+void limit_dos_space(i)
+
+char i;
+
+BEGIN
+
+unsigned long limit;
+unsigned max_cylinders;
+
+        /* In 32 bits: with one head of 63 sectors the limit is over 65535 */
+        limit = FAT16_MAX_SECTORS / (ul(max_head[cur_disk]) * ul(max_sector[cur_disk]));
+        max_cylinders = limit > 65535L ? 65535 : u(limit);
+        if (free_space[i].space > max_cylinders)
+           BEGIN
+            free_space[i].space = max_cylinders;
+            free_space[i].end = free_space[i].start + max_cylinders - 1;
+            free_space[i].mbytes_unused = cylinders_to_mbytes(max_cylinders,cur_disk);
+            free_space[i].percent_unused = (unsigned)cylinders_to_percent(max_cylinders,total_disk[cur_disk]);
+           END
+        return;
 END
 
 
@@ -390,12 +421,15 @@ char   ext_location;
             /* Unless we're past the end of the free space */
             while ((temp !=u(0)) && (free_space[last_found_partition].space!= u(0)));  /* AC000 */
 
+        /* A logical drive must still fit FAT16 */
+        limit_dos_space(last_found_partition);
+
         /* Return with the pointer to the largest free space */
         return(last_found_partition);
 END
 
 
-/*  */
+/*  */
 void sort_ext_table(size)
 
 char size;

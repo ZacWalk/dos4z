@@ -1157,6 +1157,10 @@ ParseDev:
 	STC				; simulate a Carry return from DevName
 	JNZ	SkipSearch		; no parse.  simulate a file return.
 	Context DS
+; Tell DEVNAME the real search attributes, so a volume label search never
+; matches a character device such as CON (MS-DOS 5.00 does the same).
+	MOV	AL,SAttrib
+	MOV	Attrib,AL
 	Invoke	DevName
 	ASSUME	DS:NOTHING
 SkipSearch:

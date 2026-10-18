@@ -122,9 +122,9 @@ FOK:
 	POP	AX
 
 ;; 10/29/86 E5 char
-	xor	AL,AL			; MZ 19 Jan 84
-	LeaveCrit   critDisk
-	transfer    Sys_Ret_OK		; no more, bye!
+	MOV	AX,0100h		; AX = 0100h on success, as later DOS
+	LeaveCrit   critDisk		;  versions return (was AL = 0 and AH
+	transfer    Sys_Ret_OK		;  left over)
 EndProc $Current_Dir
 
 BREAK <$RmDir -- Remove a directory>

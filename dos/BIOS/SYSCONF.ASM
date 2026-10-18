@@ -2297,10 +2297,11 @@ TRYS:
 	CMP	AH,'S'
 	JNZ	TRYX
 	MOV	[COMMAND_LINE+1],0
-	MOV	DI,OFFSET COMMND + 1
-	MOV	[DI-1],AL
-STORESHELL:
-	CALL	GETCHR
+	MOV	DI,OFFSET COMMND	; send the first character (in AL)
+	JMP	SHORT STORESHELL1	;  through the same end checks, so
+STORESHELL:				;  an empty SHELL= cannot swallow
+	CALL	GETCHR			;  the next CONFIG.SYS line
+STORESHELL1:
 	OR	AL,AL
 	JZ	GETSHPARMS
 	CMP	AL," "

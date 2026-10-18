@@ -1884,9 +1884,8 @@ $$IF29:
 ;	   $if	ne			; if it is not			       ;AN010;
 	   JE $$IF39
 
-	       or   al,al		;    loop it any other value caus'     ;AC010;
-Freeze:
-	       jnz  freeze		;    no one should EVER issue this     ;AC010;
+	       or   al,al		;    any other value used to hang here ;AC010;
+	       jnz  ContJ		;    forever; pass it down the chain   ;AC010;
 	       cmp  skip_check,1	; is skip_check set ?		       ;AN010;
 ;	       $if  e			; if it is			       ;AN011;
 	       JNE $$IF40

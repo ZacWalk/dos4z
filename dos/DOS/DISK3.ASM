@@ -137,7 +137,12 @@ WRITE_OK:
 CALCLUS:
 	PUSH	[HIGH_SECTOR]		;F.C. >32mb				;AN000;
 	CALL	SHR32			;F.C. >32mb				;AN000;
+	CMP	[HIGH_SECTOR],0 	; last cluster past 65535? the high word
 	POP	[HIGH_SECTOR]		;F.C. >32mb				;AN000;
+	JE	CALCLUS16		;  used to be dropped, so the write went
+	MOV	[DISK_FULL],1		;  to the wrong cluster; no FAT is that
+	JMP	WRTERR			;  big, so report the disk as full
+CALCLUS16:
 
 ;	SHR	AX,CL			; Last cluster to be accessed
 	PUSH	AX
@@ -435,6 +440,11 @@ WRTEOF:
 	CALL	DIV32			      ;F.C. >32mb			;AN000;
 	POP	BX			      ;F.C. >32mb			;AN000;
 	CALL	SHR32			      ;F.C. >32mb			;AN000;
+	CMP	[HIGH_SECTOR],0 	; as in CALCLUS: a size needing more
+	JE	WRTEOF16		;  than 65535 clusters cannot fit
+	MOV	[DISK_FULL],1
+	JMP	WRTERR
+WRTEOF16:
 
 
 ;	SHR	AX,CL

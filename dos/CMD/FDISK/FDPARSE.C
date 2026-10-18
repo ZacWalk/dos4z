@@ -171,7 +171,7 @@ BEGIN                                                                   /* AN000
   sp_val.p_range       =  uc(1);                                        /* AN000 - Number of ranges */
   sp_val.p_range_one   =  uc(1);                                        /* AN000 - range number one */
   sp_val.p_low_range   =  ul(1);                                        /* AN000 - low value for range */
-  sp_val.p_high_range  =  ul(4000);                                     /* AN000 - high value for range */
+  sp_val.p_high_range  =  ul(65535);                                    /* MB; was 4000, too small to give the rest of a big disk to /EXT */
 
   return;                                                               /* AN000 */
 

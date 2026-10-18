@@ -62,6 +62,7 @@ void     get_string_input(unsigned,unsigned,char far *);
 char     find_part_free_space(char);
 void     sort_part_table(char);
 char     find_ext_free_space(void);
+void     limit_dos_space(char);
 void     sort_ext_table(char);
 
 

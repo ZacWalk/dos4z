@@ -52,6 +52,7 @@ Installed = TRUE
 	i_need	SWAP_ALWAYS_AREA,DWORD
 	i_need	SWAP_ALWAYS_AREA_LEN,WORD
 	i_need	SWAP_AREA_LEN,WORD
+	i_need	MAXCOM,BYTE
 
 BREAK <ServerCall -- Server DOS call>
 
@@ -254,7 +255,13 @@ ASSUME	DS:NOTHING,ES:NOTHING
 	MOV	[SaveDS],DS
 	MOV	[SaveBX],BX
 	MOV	fSharing,-1		; set no redirect flag
+	CMP	AH,MAXCOM		; REDISP indexes the dispatch table with
+	JA	SrvBadCall		;  AH unchecked; reject what INT 21h would
 	transfer REDISP
+
+SrvBadCall:				; same result as an out-of-range INT 21h:
+	MOV	AL,0			;  AL = 0, other registers as passed
+	transfer LEAVEDOS
 
 GET_DOS_DATA:
 ASSUME	DS:NOTHING,ES:NOTHING

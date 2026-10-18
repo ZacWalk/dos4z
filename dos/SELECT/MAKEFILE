@@ -188,18 +188,13 @@ services.lib : selquit.obj selchild.obj services.obj get_help.obj selserv.obj
         lib services.lib -+ get_help;
         lib services.lib -+ selserv;
 
-cassfar.obj : cassfar.asm castruc.inc
-
-cassfar.lib: cassfar.obj
-	lib cassfar.lib +cassfar.obj;
-
 select.exe: select0.obj select1.obj select2.obj select2a.obj select3.obj \
       select4.obj select5.obj select6.obj select7.obj select8.obj select9.obj \
       routines.obj routine2.obj gen_coms.obj intvec.obj select5a.obj \
       ckdisp.obj scn_parm.obj prn_def.obj var.obj caservic.obj input.obj \
       initmem.obj mparse.obj mod_copy.obj s_disply.obj bridge.obj \
       asm2c.obj get_stat.obj global.obj int13.obj bootrec.obj select5a.obj \
-      cassfar.obj services.lib
+      services.lib
         link /noe @select.lnk
 # The "/noe" is so symbols defined in source files supercede library routines
 
@@ -229,7 +224,7 @@ scroll.obj: scroll.asm sel-pan.inc panel.inf
 
 sel-pan.obj: sel-pan.asm $(inc)\casvar.inc sel-pan.inc 
 
-sel-pan.exe: sel-pan.obj panels.obj colors.obj scroll.obj cassfar.lib
+sel-pan.exe: sel-pan.obj panels.obj colors.obj scroll.obj
         link @sel-pan.lnk
 
 select.dat: sel-pan.exe

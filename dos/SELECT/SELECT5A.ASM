@@ -15,12 +15,12 @@ SUBTTL	SELECT5A.asm						;AN000;
 ;
 ;		  Panel flow is defined in the following files:
 ;
-;		      - SELECT1.ASM
-;		      - SELECT2.ASM
-;		      - SELECT3.ASM
-;		      - SELECT4.ASM
-;		      - SELECT5.ASM
-;		      - SELECT6.ASM
+;		      Ч SELECT1.ASM
+;		      Ч SELECT2.ASM
+;		      Ч SELECT3.ASM
+;		      Ч SELECT4.ASM
+;		      Ч SELECT5.ASM
+;		      Ч SELECT6.ASM
 ;
 ;  Module contains code for :
 ;	- Date/Time screen
@@ -64,10 +64,10 @@ SELECT	SEGMENT PARA PUBLIC 'SELECT'                            ;AN000;segment fo
 	EXTRN	EXIT_SELECT:NEAR				;AN000;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;
-;  ------------------------------------д©
-;  -DATE_TIME_SCREEN			-
-;  -					-
-;  --------------------------------------
+;  здддддддддддддддддддддддддддддддддддд©
+;  ЁDATE_TIME_SCREEN			Ё
+;  Ё					Ё
+;  юдддддддддддддддддддддддддддддддддддды
 ;
 ;  The INSTALL DATE and TIME SCREEN is presented if the active date is 1/1/80.
 ;  If the user is installing to drive C: , this is the first screen presented

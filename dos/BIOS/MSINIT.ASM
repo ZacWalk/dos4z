@@ -279,13 +279,19 @@ DISKTABLE DW	512,	0100H,	64,	0
 
 ;AN004 Default DiskTable under the assumption of Total FAT size <= 128 KB, and
 ;	the maxium size of FAT entry = 16 Bit.
+; A FAT16 volume can have at most 65524 clusters, so 32 KB clusters stop at
+; 3FFF60h sectors (not 400000h, which gives 65527 clusters and makes the
+; last ones collide with the FFF7h bad-cluster and FFF8h end-of-chain
+; marks).  Unformatted partitions beyond 4 GB cannot be FAT16 at all; the
+; last entry catches them (the scan used to run off the end of the table).
 DiskTable2  dw	 0, 32680, 0803h, 512, 0	;For compatibility.
 	    dw	4h, 0000h, 0402h, 512, FBIG	;Covers upto 134 MB media.
 	    dw	8h, 0000h, 0803h, 512, FBIG	;	upto 268 MB
 	    dw 10h, 0000h, 1004h, 512, FBIG	;	upto 536 MB
 	    dw 20h, 0000h, 2005h, 512, FBIG	;	upto 1072 MB
-	    dw 40h, 0000h, 4006h, 512, FBIG	;	upto 2144 MB
+	    dw 3Fh,0FF60h, 4006h, 512, FBIG	;	upto 2047 MB
 	    dw 80h, 0000h, 8007h, 512, FBIG	;	upto 4288 MB...
+	    dw 0FFFFh,0FFFFh, 8007h, 512, FBIG+FTOOBIG ; too big for FAT16
 
 ;******************************************************************************
 ;Variables for Mini disk initialization - J.K. 4/7/86
@@ -302,6 +308,18 @@ Mini_SECLIM	dw	0
 Mini_BPB_ptr	dw	0		;temporary variable used to save the
 					;Mini Disk BPB pointer address in DskDrvs.
 ;J.K. 4/7/86 End of Mini Disk Init Variables **********************************
+
+; Large disk support.  Partitions are located by the LBA fields of the
+; partition tables; logical drives get absolute hidden sector counts.
+	EXTRN	LBA_Drives:BYTE, LBA_Func:BYTE, LBA_Lo:WORD, LBA_Hi:WORD
+	EXTRN	LBA_Left:WORD, Is_LBA_Drive:NEAR, LBA_Xfer:NEAR
+Part_Base_L	dw	0		;absolute sector of the partition table
+Part_Base_H	dw	0		; being scanned (0 for the MBR)
+Ext_Base_L	dw	0		;absolute sector of the extended partition
+Ext_Base_H	dw	0
+Ext_Size_L	dw	0		;its size: every EBR lies inside it
+Ext_Size_H	dw	0
+EBR_Count	db	0		;guards against looping EBR chains
 
 
 BIOS_DATE DB	'01/10/84',0     ;This is used for checking AT ROM BIOS date.
@@ -1467,6 +1485,103 @@ NORM_RET:
 	RET
 GETBOOT ENDP
 
+;   Detect_LBA - CHECK UNIT DL FOR THE INT 13H EXTENSIONS (AH=41H).  IF THE
+;   BIOS SUPPORTS THE PACKET CALLS (42H-44H, 47H, 48H) THE UNIT'S BIT IS
+;   SET IN LBA_Drives SO MSDISK ADDRESSES IT BY ABSOLUTE SECTOR NUMBER.
+;   ALL REGISTERS ARE PRESERVED.
+
+Detect_LBA PROC NEAR
+	PUSH	AX
+	PUSH	BX
+	PUSH	CX
+	PUSH	DX
+	MOV	AH,41H
+	MOV	BX,55AAH
+	INT	13H
+	JC	DL_RET			; NO EXTENSIONS
+	CMP	BX,0AA55H
+	JNE	DL_RET
+	TEST	CL,1			; PACKET (FIXED DISK ACCESS) SUBSET?
+	JZ	DL_RET
+	POP	DX
+	PUSH	DX
+	MOV	CL,DL
+	AND	CL,7
+	MOV	AL,1
+	SHL	AL,CL
+	OR	CS:[LBA_Drives],AL
+DL_RET:
+	POP	DX
+	POP	CX
+	POP	BX
+	POP	AX
+	RET
+Detect_LBA ENDP
+
+;   Read_Abs_Sector - READ ABSOLUTE SECTOR DX:AX OF THE FIXED DISK WHOSE BDS
+;   IS AT DS:DI (DRIVENUM, FLAGS, HDLIM AND SECLIM MUST BE SET) INTO ES:BX.
+;   UNITS WITH THE INT 13H EXTENSIONS ARE READ BY LBA; OTHERWISE THE SECTOR
+;   MUST BE REACHABLE THROUGH CHS (CYLINDER < 1024).
+;   OUTPUT: CARRY CLEAR IF READ.  CARRY SET AND AH = 0FFH IF THE SECTOR IS
+;   OUT OF CHS REACH, OTHERWISE AH = INT 13H ERROR STATUS.
+;   PRESERVES BX, CX, DX, SI, DI, DS, ES.
+
+Read_Abs_Sector PROC NEAR
+	PUSH	CX
+	PUSH	DX
+	CALL	Is_LBA_Drive
+	JZ	RAS_CHS
+	MOV	CS:[LBA_Lo],AX
+	MOV	CS:[LBA_Hi],DX
+	MOV	CS:[LBA_Left],1
+	MOV	CS:[LBA_Func],ROMREAD
+	CALL	LBA_Xfer
+	JMP	SHORT RAS_RET
+RAS_CHS:
+	PUSH	BX
+	MOV	BX,[DI].SECLIM
+	MOV	CX,AX			; CX = SECTOR (LOW)
+	MOV	AX,DX
+	XOR	DX,DX
+	DIV	BX			; AX = TRACK (HIGH)
+	PUSH	AX
+	MOV	AX,CX
+	DIV	BX			; AX = TRACK (LOW), DX = SECTOR - 1
+	MOV	CL,DL
+	INC	CL			; CL = SECTOR (1-BASED)
+	POP	DX			; DX = TRACK (HIGH)
+	MOV	BX,[DI].HDLIM
+	PUSH	AX
+	MOV	AX,DX
+	XOR	DX,DX
+	DIV	BX			; AX = CYLINDER (HIGH)
+	OR	AX,AX
+	POP	AX			; AX = TRACK (LOW)
+	JNZ	RAS_TOO_FAR
+	DIV	BX			; AX = CYLINDER, DX = HEAD
+	CMP	AX,1024
+	JAE	RAS_TOO_FAR
+	MOV	DH,DL			; DH = HEAD
+	MOV	CH,AL			; CH = CYLINDER BITS 0-7
+	ROR	AH,1
+	ROR	AH,1
+	AND	AH,0C0H
+	OR	CL,AH			; CL = SECTOR + CYLINDER BITS 8-9
+	MOV	DL,[DI].DRIVENUM
+	POP	BX
+	MOV	AX,0201H
+	INT	13H
+	JMP	SHORT RAS_RET
+RAS_TOO_FAR:
+	POP	BX
+	MOV	AH,0FFH
+	STC
+RAS_RET:
+	POP	DX
+	POP	CX
+	RET
+Read_Abs_Sector ENDP
+
 ;   SETHARD - GENERATE BPB FOR A VARIABLE SIZED HARD FILE.  IBM HAS A
 ;   PARTITIONED HARD FILE; WE MUST READ PHYSICAL SECTOR 0 TO DETERMINE WHERE
 ;   OUR OWN LOGICAL SECTORS START.  WE ALSO READ IN OUR BOOT SECTOR TO
@@ -1498,12 +1613,17 @@ SETHARD PROC	NEAR
 ; DL IS NUMBER OF HARD DISKS ATTACHED
 ; LOW 6 BITS OF CL IS SECTORS/TRACK
 ; HIGH 2 BITS OF CL WITH CH ARE MAX # OF CYLINDERS
-	INC	DH			; GET NUMBER OF HEADS
-	MOV	BYTE PTR [DI].HDLIM,DH
+	MOV	AL,DH			; HIGHEST HEAD NUMBER
 	POP	DX
 	JC	SETRET			; CARRY HERE MEANS NO HARD DISK
+	XOR	AH,AH
+	INC	AX			; GET NUMBER OF HEADS (256 MUST NOT BE 0)
+	MOV	[DI].HDLIM,AX
 	AND	CL,3FH			; EXTRACT NUMBER OF SECTORS/TRACK
 	MOV	BYTE PTR [DI].SECLIM,CL
+	CALL	Detect_LBA		; INT 13H EXTENSIONS ON THIS UNIT?
+	MOV	CS:Part_Base_L,0	; PRIMARY PARTITIONS ARE IN THE MBR
+	MOV	CS:Part_Base_H,0
 	CALL	GETBOOT 		;   IF (GETBOOT ())
 	assume	es:nothing
 	JC	SETRET			;	RETURN -1;
@@ -1522,6 +1642,11 @@ SET1:
 	jz	set2
 ;SB34INIT006******************************************************************
 
+	cmp	byte ptr es:[bx],0Eh	; FAT16 LBA partitions are used only
+	jne	Set1_Next		;  when the unit is accessed by LBA
+	call	Is_LBA_Drive
+	jnz	SET2
+Set1_Next:
 	ADD	BX,16			;	P += SIZEOF PARTITION;
 	CMP	BX,202H+BOOTBIAS	;	IF (P == &BOOT[0X202H])
 	JNZ	SET1			;	    RETURN -1;}
@@ -1548,8 +1673,15 @@ SET2:
 ;	 PUSH	 DX	;AN000;
 	mov	cs:ROM_drv_num, dl	;AN000; save the ROM BIOS drive number we are handling now.
 
+; The partition start in the table is relative to the sector holding the
+; table (the MBR, or an extended boot record for a logical drive), so
+; adding Part_Base gives the absolute sector used as the hidden count.
 	MOV	AX,WORD PTR ES:[BX+4]	;Hidden sectors
 	MOV	DX,WORD PTR ES:[BX+6]
+	ADD	AX,CS:Part_Base_L
+	ADC	DX,CS:Part_Base_H
+	MOV	[DI].HIDSEC_L,AX	;   BPB->HIDSECCT = P->PARTITIONBEGIN;
+	MOV	[DI].HIDSEC_H,DX
 
 
 	;Decrement the sector count by 1 to make it zero based. Exactly 64k
@@ -1565,13 +1697,6 @@ SET2:
 	  MESSAGE FTESTHARD,<"PARTITION INVALID",CR,LF>
 	OR	FBIGFAT,FTOOBIG
 OKDRIVE:
-;	 POP	 DX
-	MOV	AX,WORD PTR ES:[BX+4]
-
-	MOV	[DI].HIDSEC_L,AX	;   BPB->HIDSECCT = P->PARTITIONBEGIN;
-	mov	ax,word ptr es:[bx+6]	;AN000;
-	mov	[di].HIDSEC_H,ax	;AN000;
-
 	mov	dx,word ptr es:[bx+10]	;AN000; # of sectors (High)
 	MOV	AX,WORD PTR ES:[BX+8]	;# of sectors (Low)
 	mov	word ptr [di].DRVLIM_H,dx ;AN000;
@@ -1582,83 +1707,19 @@ OKDRIVE:
 	JB	SETRET			;	RETURN -1;
 
 OKDrive_Cont:				;AN000;
- ;	 PUSH	 DX			;AC000;
-	mov	dx,[di].HIDSEC_H	;AN000;
-	MOV	AX,[DI].HIDSEC_L	; BOOT SECTOR NUMBER - For mini disk,;J.K.
-;	 XOR	 DX,DX			 ; this will be logical and equal to  ;AC000;
-	xor	bx,bx			;usUally equal to the # of sec/trk.  ;J.K.
-;	 MOV	 BH,DH			;AC000;
-	MOV	BL,BYTE PTR [DI].SECLIM
-	push	ax			;AN000;
-	mov	ax,dx			;AN000;
-	xor	dx,dx			;AN000;
-	div	bx			;AN000;
-	mov	cs:[Temp_H],ax		;AN000;
-	pop	ax			;AN000;
-	DIV	BX			;(Sectors)DX;AX / (Seclim)BX =(Track) Temp_H;AX + (Sector)DX
-	MOV	CL,DL			; CL IS SECTOR NUMBER;J.K.Assume sector number < 255.
-	INC	CL			; SECTORS ARE 1 BASED
-;	 CWD				;AC000;
-
-	xor	bx,bx			;AN000;
-	MOV	BL,BYTE PTR [DI].HDLIM
-	push	ax			;AN000;
-	xor	dx,dx			;AN000;
-	mov	ax, cs:[Temp_H] 	;AN000;
-	div	bx			;AN000;
-	mov	cs:[Temp_H],ax		;AN000;
-	pop	ax			;AN000;
-	DIV	BX			; DL IS HEAD, AX IS CYLINDER
-	cmp	cs:[Temp_H],0		;AN000;
-	ja	SetRet_brdg		;AN000; Exceeds the limit of Int 13h
-	cmp	ax, 1024		;AN000;
-	ja	SetRet_brdg		;AN000; Exceeds the limit of Int 13h
-
-; DL IS HEAD.
-; AX IS CYLINDER
-; CL IS SECTOR NUMBER (assume less than 2**6 = 64 for INT 13h)
-
-;*** For Mini Disks *** J.K. 4/7/86
-	cmp	word ptr [di].ISMINI, 1 ;check for mini disk -J.K. 4/7/86
-	jnz	OKnotMini		;not mini disk. -J.K. 4/7/86
-	add	ax, [di].HIDDEN_TRKS	;set the physical track number -J.K. 4/7/86
-OKnotMini:				;J.K. 4/7/86
-;*** End of added logic for mini disk
-	ROR	AH,1			; MOVE HIGH TWO BITS OF CYL TO HIGH
-	ROR	AH,1			; TWO BITS OF UPPER BYTE
-	AND	AH,0C0H 		; TURN OFF REMAINDER OF BITS
-	OR	CL,AH			; MOVE TWO BITS TO CORRECT SPOT
-	MOV	CH,AL			; CH IS CYLINDER
-
-; CL IS SECTOR + 2 HIGH BITS OF CYLINDER
-; CH IS LOW 8 BITS OF CYLINDER
-; DL IS HEAD
-; ROM_drv_num IS DRIVE
-
-;	 POP	 AX			 ;AC000; AL IS DRIVE
-	MOV	DH,DL			; DH IS HEAD
-;	 MOV	 DL,AL			 ;AC000; DL IS DRIVE
-	mov	dl, cs:ROM_drv_num	;AN000; Set the drive number
-
-; CL IS SECTOR + 2 HIGH BITS OF CYLINDER
-; CH IS LOW 8 BITS OF CYLINDER
-; DH IS HEAD
-; DL IS DRIVE
 ;J.K. For convenience, we are going to read the logical boot sector
 ;into cs:DiskSector area.
-
-;SB34INIT009*************************************************************
-;SB  Read in boot sector using BIOS disk interrupt.  The buffer where it
-;SB  is to be read in is cs:Disksector.
-;SB	5 LOCS
-
+	MOV	AX,[DI].HIDSEC_L
+	MOV	DX,[DI].HIDSEC_H
 	push	cs
 	pop	es
 	mov	bx,offset DiskSector
-	mov	ax,0201h	; read, one sector
-	int	13h
-
-;SB34INIT009*************************************************************
+	call	Read_Abs_Sector
+	jnc	Boot_Sec_Read
+	cmp	ah,0FFh 		; out of CHS reach and no LBA:
+	je	SetRet_brdg		;  the partition cannot be used
+	mov	word ptr cs:[DiskSector+3],0 ; read error: fail the signature
+Boot_Sec_Read:				;  check so the defaults are used
 
 ; cs:Disksec contains THE BOOT SECTOR.	IN THEORY, (HA HA) THE BPB IN THIS THING
 ; IS CORRECT.  WE CAN, THEREFORE, SUCK OUT ALL THE RELEVANT STATISTICS ON THE
@@ -1681,9 +1742,9 @@ notmssig:
 ;	check for Microsoft OS/2 signature also. 7/29/88. HKN
 notibmsig:
 	CMP	WORD PTR cs:[bx+3], "S" SHL 8 + "O"
-	JNZ	UNKNOWNJ
+	JNZ	Check_BPB
 	CMP	WORD PTR cs:[bx+5], " " SHL 8 + "2"
-	JNZ	UNKNOWNJ
+	JNZ	Check_BPB
 ;-----------------------------------------------------------------------
 	
 sigfound:			; signature was found, now check version
@@ -1701,6 +1762,46 @@ UNKNOWNJ:
 	JMP	UNKNOWN 			;Unformatted or illegal media.
 UNKNOWN3_0_J:					;AN012;Legally formatted media,
 	jmp	Unknown3_0			;AN012; although, content might be bad.
+
+; Another system's name - mkfs.fat's, Windows 95's, a camera's - says
+; nothing about the BPB behind it, so the BPB has to speak for itself. It is
+; used if it describes a FAT12 or FAT16 volume: a jump first, 512-byte
+; sectors, a power of two sectors a cluster, reserved sectors, one or two
+; FATs, root directory entries, a FAT size (FAT32 has neither), a media
+; byte and a size. Anything else is treated as unformatted, as before.
+Check_BPB:
+	mov	al, cs:[bx]
+	cmp	al, 0EBh		; JMP SHORT
+	je	Check_BPB_Jump
+	cmp	al, 0E9h		; JMP NEAR
+	jne	UNKNOWNJ
+Check_BPB_Jump:
+	cmp	word ptr cs:[bx+11], 512 ; bytes per sector
+	jne	UNKNOWNJ
+	mov	al, cs:[bx+13]		; sectors per cluster
+	or	al, al
+	jz	UNKNOWNJ
+	mov	ah, al
+	dec	ah
+	test	al, ah			;  a power of two
+	jnz	UNKNOWNJ
+	cmp	word ptr cs:[bx+14], 0	; reserved sectors
+	je	UNKNOWNJ
+	mov	al, cs:[bx+16]		; number of FATs, 1 or 2
+	dec	al
+	cmp	al, 1
+	ja	UNKNOWNJ
+	cmp	word ptr cs:[bx+17], 0	; root directory entries
+	je	UNKNOWNJ
+	cmp	byte ptr cs:[bx+21], 0F0h ; media byte
+	jb	UNKNOWNJ
+	cmp	word ptr cs:[bx+22], 0	; sectors per FAT
+	je	UNKNOWNJ
+	mov	ax, cs:[bx+19]		; total sectors, as a word
+	or	ax, cs:[bx+32]		;  or as a double word
+	or	ax, cs:[bx+34]
+	jz	UNKNOWNJ
+	jmp	COPYBPB
 
 TRY5:
 	call	Cover_Fdisk_Bug 		;AN010;
@@ -1757,14 +1858,31 @@ COPYBPB_FAT:				;AN000;  Fat system
 
 Fat_Big_Small:				 ;AN000; Determine Fat entry size.
 ;At this moment DX;AX = Total sector number
-;	 DEC	 AX			 ; SUBTRACT # RESERVED (ALWAYS 1)
-	sub	ax,1			;AN000; Subtrack # reserved (always 1)
-	sbb	dx,0			;AN000;
+; Take the reserved sector and FAT counts from the boot sector as well.
+; DOS FORMAT always writes 1 and 2, but other systems need not (mkfs.fat
+; pads the reserved area for alignment), and assuming 1 and 2 put the
+; FATs and root directory in the wrong place. Zero is invalid: keep 1, 2.
+	mov	bx, cs:[si.RESNUM]
+	mov	cl, cs:[si.FATNUM]
+	or	bx,bx
+	jz	Fat_Layout_Default
+	or	cl,cl
+	jnz	Fat_Layout_Set
+Fat_Layout_Default:
+	mov	bx,1
+	mov	cl,2
+Fat_Layout_Set:
+	mov	[di].RESSEC,bx
+	mov	[di].CFAT,cl
+	sub	ax,bx			; subtract the reserved sectors
+	sbb	dx,0
 	mov	bx, cs:[si.FATSIZE]	;AN000;  BX = Sectors/Fat
 	mov	[di.CSECFAT],bx 	;AN000;  Set in BDS BPB
-	shl	bx,1			;AN000; Always 2 FATS
-	sub	ax,bx			;AN000; Sub # fat sectors
-	sbb	dx,0			;AN000;
+	xor	ch,ch
+Fat_Sub_FATs:
+	sub	ax,bx			;AN000; Sub # fat sectors, once
+	sbb	dx,0			;AN000;  for each FAT
+	loop	Fat_Sub_FATs
 	mov	bx, cs:[si.DIRNUM]	;AN000;  # root entries
 	mov	[di.cDIR],bx		;AN000;  Set in BDS BPB
 
@@ -1792,6 +1910,8 @@ Fat_Big_Small:				 ;AN000; Determine Fat entry size.
 	DIV	CX			;AN000;  [Temp_H];AX NOW CONTAINS THE # CLUSTERS.
 	cmp	cs:[Temp_H],0		;AN000;
 	ja	TooBig_Ret		;AN000;  Too big cluster number
+	cmp	ax,65524		; more clusters than FAT16 can address
+	ja	TooBig_Ret		;  (FFF7h and up are marks, not clusters)
 	CMP	AX,4096-10		; IS THIS 16-BIT FAT?
 	JB	CopyMediaID		; NO, small FAT
 	OR	FBIGFAT,FBIG		; 16 BIT FAT
@@ -1836,6 +1956,10 @@ GOTPARM:
 ;	 MOV	 CL,BYTE PTR [SI+6]
 	mov	cl,byte ptr [si+8]	;AN000;  Fat size for FBIGFAT flag
 	OR	FBIGFAT,CL
+	test	cl,FTOOBIG		; beyond FAT16: leave the drive
+	jz	GotParm_FAT		;  unusable rather than divide
+	jmp	TooBig_Ret		;  overflow on its FAT size
+GotParm_FAT:
 ;	 MOV	 CX,[SI+2]
 ;	 MOV	 DX,[SI+4]
 	mov	cx, word ptr cs:[SI+4]	;AN000;
@@ -2046,7 +2170,17 @@ NO_CYL_RND:
 	PUSH	ES
 	POP	DS
 	LEA	SI,[DI].BYTEPERSEC	; DS:SI -> BPB FOR HARD FILE
-	JMP	SHORT SET_RECBPB
+	PUSH	DI
+	LEA	DI,[DI].RBYTEPERSEC	; ES:DI -> RECBPB
+	MOV	CX,BPBSIZ
+	REP	MOVSB
+	POP	DI
+; FORMAT starts from this BPB. Keep DOS's own layout of 1 reserved sector
+; and 2 FATs even when the volume was formatted with other values (its
+; FAT size calculation assumes them).
+	MOV	WORD PTR [DI].RRESSEC,1
+	MOV	BYTE PTR [DI].RCFAT,2
+	JMP	GO_TO_NEXT_BDS
 
 NOTHARDFF:
 ;J.K. We don't use the extended BPB for a floppy.
@@ -2409,9 +2543,9 @@ DoMini:
 
 	mov	Rom_Minidsk_num, 80h
 DoMiniBegin:
-	inc	dh			;Get # of heads (convert it to 1 based)
-	xor	ax, ax
-	mov	al, dh
+	mov	al, dh			;highest head number
+	xor	ah, ah
+	inc	ax			;# of heads (256 must not become 0)
 	mov	Mini_HDLIM, ax		;save it.
 	xor	ax, ax
 	and	cl, 3fh 		;Get # of sectors/track
@@ -2419,6 +2553,7 @@ DoMiniBegin:
 	mov	Mini_SECLIM, ax 	;and save it.
 
 	mov	dl, Rom_Minidsk_num	;drive number <DL>
+	call	Detect_LBA		;INT 13h extensions on this unit?
 	call	GETBOOT 		;read master boot record into 7c0:BootBias
 	assume	es:nothing
 	jc	DoMiniNext
@@ -2439,8 +2574,14 @@ DoMiniRet:
 	ret
 
 
-;Find_Mini_Partition tries to find every Extended partition on a disk.
-;At entry:	DI -> BDSM entry
+;Find_Mini_Partition installs the logical drives of the extended partition
+;on a disk.  The chain of extended boot records is followed with the LBA
+;(relative sector) fields of the partition tables: the CHS fields are
+;meaningless beyond cylinder 1023 and the records need not start on a
+;cylinder boundary.  Logical drives get an absolute hidden sector count,
+;so they are not "mini disks" with hidden tracks any more.  Types 0Fh and
+;0Eh are only used on units that are accessed by LBA.
+;At entry:	DI -> next free BDSM entry
 ;		ES:BX -> 07c0:BootBias - Master Boot Record
 ;		Rom_MiniDsk_Num  - ROM drive number
 ;		MiniNum - Logical drive number
@@ -2451,22 +2592,132 @@ DoMiniRet:
 ;
 ;
 FIND_MINI_PARTITION:
-
 	add	bx, 1C2h		;BX -> system id.
 
 FmpNext:
-	cmp	byte ptr ES:[BX], 5	; 5 = extended partition ID.
-	jz	FmpGot
+	call	Fmp_Is_Ext		;extended partition?
+	jnc	FmpGot
 	add	bx, 16			; for next entry
 	cmp	bx, 202h+BootBias
 	jnz	FmpNext
-	jmp	FmpRet			;not found extended partition
+FmpRet:
+	ret				;not found extended partition
 
 FmpGot: 				;found my partition.
 	Message ftestHard,<"Found my partition...",cr,lf>
-	xor	ax,ax
-	or	al, fNon_Removable
-	or	word ptr [DI].Flags, ax
+	mov	ax, es:[bx+8]		;its size
+	mov	Ext_Size_L, ax
+	mov	ax, es:[bx+10]
+	mov	Ext_Size_H, ax
+	mov	ax, es:[bx+4]		;the start of the extended partition
+	mov	dx, es:[bx+6]		; is absolute in the MBR
+	mov	Ext_Base_L, ax
+	mov	Ext_Base_H, dx
+	mov	EBR_Count, 0
+FmpEBR: 				;DX:AX = absolute sector of an EBR
+	mov	Part_Base_L, ax
+	mov	Part_Base_H, dx
+	inc	EBR_Count
+	cmp	EBR_Count, 64		;looping chain?
+	ja	FmpRet
+	cmp	num_mini_dsk, Max_mini_dsk_num ;out of BDSM entries?
+	jae	FmpRet
+	cmp	mininum, 26		;out of drive letters?
+	jae	FmpRet
+	call	Fmp_Init_BDSM
+	mov	ax, Part_Base_L
+	mov	dx, Part_Base_H
+	mov	bx, BOOTBIAS
+	call	Read_Abs_Sector 	;read the EBR into BootBias
+	jc	FmpRet			;cannot continue.
+	cmp	word ptr es:[BOOTBIAS+1FEh], 0AA55h
+	jne	FmpRet
+	mov	bx, 1c2h+BOOTBIAS
+
+	push	es			;;DCL/KWC 8/2/87 addressability to
+					;; next minidisk
+
+	call	SetMini 		;install a mini disk. BX value saved.
+
+	pop	es			;;DCL/KWC 8/2/87
+
+	jc	FmpLink
+
+	call	Install_BDSM		;install the BDSM into the BDS table
+	inc	mininum 		;increase the logical drive number for next
+	inc	num_mini_dsk		;increase the number of mini disk installed.
+
+	mov	bx, Mini_BPB_ptr	;now, set the DskDrvs pointer to BPB info.
+	lea	si, [di].BYTEPERSEC	;points to BPB of BDSM
+	mov	[bx], si
+	add	Mini_BPB_ptr, 2 	;advance to the next address
+
+	add	DI, type BDSM_type	;adjust to the next BDSM table entry.
+	mov	End_OF_BDSM, DI 	;set the ending address of BDSM table to this.
+FmpLink:				;find the link to the next EBR
+	mov	bx, 1c2h+BOOTBIAS
+FmpLinkNext:
+	call	Fmp_Is_Ext
+	jnc	FmpGotLink
+	add	bx, 16
+	cmp	bx, 202h+BootBias
+	jnz	FmpLinkNext
+	ret
+FmpGotLink:
+; The next EBR has to hold something, lie inside the extended partition and
+; come after this one: a link back up the chain would give its volumes a
+; second set of drive letters, and one outside would read whatever is there.
+	mov	ax, es:[bx+8]		;the next logical drive's area
+	or	ax, es:[bx+10]
+	jz	FmpLinkEnd
+	mov	ax, es:[bx+4]		;relative to the extended partition
+	mov	dx, es:[bx+6]
+	cmp	dx, Ext_Size_H
+	ja	FmpLinkEnd
+	jb	FmpLinkInside
+	cmp	ax, Ext_Size_L
+	jae	FmpLinkEnd
+FmpLinkInside:
+	add	ax, Ext_Base_L
+	adc	dx, Ext_Base_H
+	cmp	dx, Part_Base_H
+	jb	FmpLinkEnd
+	ja	FmpLinkOn
+	cmp	ax, Part_Base_L
+	jbe	FmpLinkEnd
+FmpLinkOn:
+	jmp	FmpEBR
+FmpLinkEnd:
+	ret
+
+;CF clear if the partition type byte at ES:BX is an extended partition we
+;can use: 05h, or 0Fh on a unit that is accessed by LBA. The unit is the one
+;being scanned; the BDSM at DI need not be set up for it yet.
+Fmp_Is_Ext:
+	cmp	byte ptr es:[bx], 5
+	je	Fmp_Ext_Yes
+	cmp	byte ptr es:[bx], 0Fh
+	jne	Fmp_Ext_No
+	push	ax
+	push	cx
+	mov	cl, Rom_MiniDsk_Num
+	and	cl, 7
+	mov	al, 1
+	shl	al, cl
+	test	cs:[LBA_Drives], al
+	pop	cx
+	pop	ax
+	jnz	Fmp_Ext_Yes
+Fmp_Ext_No:
+	stc
+	ret
+Fmp_Ext_Yes:
+	clc
+	ret
+
+;Prepare the BDSM at DI for the unit being scanned.
+Fmp_Init_BDSM:
+	or	word ptr [DI].Flags, fNon_Removable
 	mov	byte ptr [DI].FormFactor, ffHardFile
 	mov	fBigFat, 0		;assume 12 bit Fat.
 	mov	ax, Mini_HDLIM
@@ -2477,59 +2728,8 @@ FmpGot: 				;found my partition.
 	mov	[DI].DRIVENUM, al	;set physical number
 	mov	al, Mininum
 	mov	[DI].DRIVELET, al	;set logical number
-
-	cmp	word ptr es:[bx+10], 0	;AN000;
-	ja	FmpGot_Cont		;AN000;
-	cmp	word ptr ES:[BX+8], 64	;**With current BPB, only lower word
-					; is meaningful.
-	jb	FmpRet			;should be bigger than 64 sectors at least
-FmpGot_Cont:				;AN000;
-	sub	bx, 4			;let BX point to the start of the entry
-	mov	dh, byte ptr ES:[BX+2]
-	and	dh, 11000000b		;get higher bits of cyl
-	rol	dh, 1
-	rol	dh, 1
-	mov	dl, byte ptr ES:[BX+3]	;cyl byte
-	mov	[DI].HIDDEN_TRKS, dx	;set hidden trks
-;** Now, read the volume boot record into BootBias.
-;SB33029******************************************************************
-	mov	cx,ES:[BX+2]		;cylinder,cylinder/sector     ;SB ;3.30*
-	mov	dh,ES:[BX+1]		;head			      ;SB ;3.30*
-	mov	dl,Rom_MiniDsk_Num	;drive			      ;SB ;3.30*
-	mov	bx,BOOTBIAS		;buffer offset		      ;SB ;3.30*
-	mov	ax,0201h		;read,1 sector		      ;SB ;3.30*
-	int	13h			;call ROM-Bios routine	      ;SB ;3.30*
-;SB33029******************************************************************
-	jc	FmpRet			;cannot continue.
-	mov	bx, 1c2h+BOOTBIAS
-
-	push	es			;;DCL/KWC 8/2/87 addressability to
-					;; next minidisk
-
-	call	SetMini 		;install a mini disk. BX value saved.
-
-	pop	es			;;DCL/KWC 8/2/87
-
-	jc	FmpnextChain
-
-	call	Install_BDSM		;install the BDSM into the BDS table
-;	 call	 Show_Installed_Mini	 ;show the installed message. 3/35/86 - Don't show messages. J.K.
-	inc	mininum 		;increase the logical drive number for next
-	inc	num_mini_dsk		;increase the number of mini disk installed.
-
-	push	bx			;now, set the DskDrvs pointer to BPB info.
-	mov	bx, Mini_BPB_ptr
-	lea	si, [di].BYTEPERSEC	;points to BPB of BDSM
-	mov	[bx], si
-	inc	Mini_BPB_ptr		;advance to the next address
-	inc	Mini_BPB_ptr
-	pop	bx
-
-	add	DI, type BDSM_type	;adjust to the next BDSM table entry.
-	mov	End_OF_BDSM, DI 	;set the ending address of BDSM table to this.
-;	 Message fTestHard,<"Mini disk installed.",cr,lf>
-FmpnextChain: jmp FmpNext		;let's find out if we have any chained partition
-FmpRet:
+	mov	[DI].IsMini, 0		;hidden sectors are absolute
+	mov	[DI].Hidden_Trks, 0
 	ret
 
 SetMini:
@@ -2556,8 +2756,8 @@ assume	ds:code,es:nothing
 I_BDSM_Next:
 	cmp	word ptr es:[si], -1		;end of the list?
 	jz	I_BDSM_New
-	mov	si, word ptr es:[si].LINK
 	mov	ax, word ptr es:[si].LINK+2	;next pointer
+	mov	si, word ptr es:[si].LINK
 	mov	es, ax
 	jmp	short I_BDSM_Next
 I_BDSM_New:

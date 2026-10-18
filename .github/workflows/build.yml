@@ -13,10 +13,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Build tools (demu.exe, dimg.exe)
-      shell: pwsh
-      run: .\make-tools.ps1
-
+    # Downloads demu and dimg from the libdos release pinned in make-dos.ps1
     - name: Build MS-DOS 4.0
       shell: pwsh
       run: .\make-dos.ps1
+
+    # Boots the build in libdos's emulated IBM PC 5150: floppies, CHS and LBA
+    # hard disks, FDISK and FORMAT, and unusual FAT layouts
+    - name: Boot tests
+      shell: pwsh
+      run: .\test-boot.ps1

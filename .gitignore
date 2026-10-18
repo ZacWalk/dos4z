@@ -12,7 +12,22 @@ output/
 *.LIB
 !dos/TOOLS/**
 !dos/LIB/MAKEFILE
+# Binary files that are part of the original source release and needed by the build
 !dos/INC/COMSUBS.LIB
+!dos/LIB/MEM.LIB
+!dos/SELECT/CASSFAR.LIB
+!dos/CMD/APPEND/SYSMAC.LIB
+!dos/DEV/PRINTER/4201/4201.CPI
+!dos/DEV/PRINTER/4208/4208.CPI
+!dos/DEV/XMAEM/INDEXMAE.SYS
+# Generated during the build
+dos/INC/BOOT.INC
+dos/CMD/FDISK/FDBOOT.INC
+dos/CMD/FDISK/FDISKM.C
+dos/SELECT/PANEL.INF
+dos/SELECT/SEL-PAN.DAT
+dos/SELECT/SELECT.DAT
+dos/SELECT/SELECT.HLP
 *.CTL
 *.CL1
 *.CL2
@@ -30,10 +45,11 @@ output/
 *.CLE
 *.CLF
 *.IDX
+# Kept in sync with usa-ms.msg so BUILDIDX doesn't rewrite the message file on every build
+!dos/MESSAGES/usa-ms.IDX
 fullbuild.log
 *.COD
 *.OBJ+
-tools/demu/test_hash*.c
 dos/MEMM/MEMM/emm386_test.lnk
 dos/MEMM/MEMM/emm386_direct.lnk
 86Box/

@@ -150,8 +150,8 @@ srinuse:									;AN000;
 	CALL	GetCDSFromDrv			      ; ds:si -> cds		;AN000;
 	POP	AX				      ; 			;AN000;
 	JC	baddrv				      ; bad drive		;AN000;
-	CMP	WORD PTR [SI.curdir_devptr],0	      ; dpb ptr =0 ?		;AN000;
-	JZ	baddrv				      ;     no			;AN000;
+	CMP	WORD PTR [SI.curdir_devptr+2],0       ; dpb ptr =0 ? (segment:	;AN000;
+	JZ	baddrv				      ;  a DPB may be at offset 0)
 	CMP	AL,7				      ; set ?			;AN000;
 	JNZ	resetdrv			      ; no			;AN000;
 	OR	[SI.curdir_flags],curdir_inuse	      ; set in_use		;AN000;
@@ -396,8 +396,8 @@ Not_SRVC:
 	JNZ	GetBye			; carry clear
 GetBerr:
 	MOV	AL,error_not_DOS_disk	;AN000;IFS. Formatted IFS drive
-	CMP	WORD PTR [SI.curdir_devptr],0	 ;AN000;IFS. dpb ptr =0 ?
-	JNZ	notfat			;AN000;IFS. no
+	CMP	WORD PTR [SI.curdir_devptr+2],0  ; dpb ptr =0 ? (test the segment,
+	JNZ	notfat			;  a DPB may sit at offset 0)
 GetBerr2:
 	MOV	AL,error_invalid_drive	;AN000;;IFS. invalid FAT drive
 notfat: 				;AN000;

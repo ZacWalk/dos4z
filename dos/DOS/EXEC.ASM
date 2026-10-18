@@ -247,8 +247,9 @@ exec_scan_env:
 exec_get_environ_len:
 	REPNZ	SCASB			; find that nul byte
 	JNZ	BadEnv
-	DEC	CX			; Dec CX for the next nul byte test
-	JB	BadEnv			; gone beyond the end of the environment
+	SUB	CX,1			; Dec CX for the next nul byte test (SUB,
+	JB	BadEnv			;  not DEC: DEC leaves CF alone, so the
+					;  "gone beyond the end" test never fired)
 	SCASB				; is there another nul byte?
 	JNZ	exec_get_environ_len	; no, scan some more
 	PUSH	DI
@@ -653,6 +654,13 @@ NO_OWNER:
 	PUSH	CX			;AN007;;MS. save for fake version
 	PUSH	SI			;AN007;;MS. save for fake version
 
+; The arena name field is only 8 bytes; a longer name would run past the
+; arena header into the new process's memory.
+	CMP	CX,8
+	JBE	Name_Len_Ok
+	MOV	CX,8
+Name_Len_Ok:
+	JCXZ	mem_done
 movename:				;AN000;
 	LODSB				;AN000;;MS. get char
 	CMP	AL,'.'                  ;AN000;;MS. is '.' ,may be name.exe

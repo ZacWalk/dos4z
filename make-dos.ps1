@@ -1,10 +1,13 @@
-# make-dos.ps1 — Build MS-DOS 4.0 using demu (DOS emulator)
+# make-dos.ps1 — Build MS-DOS 4.0 with its original 1988 toolchain, run by demu
 #
-# Expects pre-built demu.exe and dimg.exe in output/.
-# Run .\make-tools.ps1 first if they are missing.
+# demu, which runs the 16-bit tools, and dimg, which makes the disk images,
+# come from libdos (https://github.com/ZacWalk/libdos): the release pinned
+# below is downloaded once into output/tools/ and checked against its SHA-256,
+# or -LibdosPath takes them from a libdos checkout's exe/ instead.
 #
-#   output/demu.exe    — the DOS emulator (pre-built)
-#   output/dimg.exe    — the disk image tool (pre-built)
+#   output/demu.exe    — the DOS emulator (from libdos)
+#   output/dimg.exe    — the disk image tool (from libdos)
+#   output/tools/      — the downloaded libdos release
 #   output/logs/       — per-component build logs
 #   output/bin/        — final DOS 4.0 binaries
 #
@@ -13,14 +16,16 @@
 #   .\make-dos.ps1 -Clean              Remove build artifacts and rebuild
 #   .\make-dos.ps1 -Component bios     Build only a specific component
 #   .\make-dos.ps1 -Verbose            Show full build output
+#   .\make-dos.ps1 -LibdosPath ..\libdos   Use a libdos checkout's demu and dimg
 #
 # Components (in build order):
-#   messages, mapper, boot, bios, dos, cmd, dev, select, memm
+#   messages, mapper, boot, bios, dos, cmd, dev, select, memm, diskinfo
 
 param(
     [switch]$Clean,
     [string]$Component = "",
-    [switch]$Verbose
+    [switch]$Verbose,
+    [string]$LibdosPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,7 +38,12 @@ $dimgExe = Join-Path $outputDir "dimg.exe"
 $logDir = Join-Path $outputDir "logs"
 $binDir = Join-Path $outputDir "bin"
 
-$components = @("messages", "mapper", "boot", "bios", "dos", "cmd", "dev", "select", "memm")
+# The libdos release that provides demu and dimg, and the SHA-256 of its zip.
+# Change both together.
+$libdosVersion = "v1.1.1"
+$libdosSha256 = "AC61F11CCC3A6C66E301D8F5D90CA8F4B23F961839EA9785EBE3EE1A7062752A"
+
+$components = @("messages", "mapper", "boot", "bios", "dos", "cmd", "dev", "select", "memm", "diskinfo")
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -60,22 +70,48 @@ function Get-ComponentDir($name) {
         "dev"      { "DEV" }
         "select"   { "SELECT" }
         "memm"     { "MEMM" }
+        "diskinfo" { "CMD\DISKINFO" }
         default    { throw "Unknown component: $name" }
     }
     return Join-Path $srcDir $sub
 }
 
-# ── Step 1: Check for pre-built tools ───────────────────────────────
+# ── Step 1: Get demu and dimg from libdos ───────────────────────────
 
-function Check-Tools {
-    Write-Step "Checking for pre-built tools"
-    if (-not (Test-Path $demuExe)) {
-        throw "demu.exe not found in output/. Run .\make-tools.ps1 first."
+function Get-LibdosTools {
+    Write-Step "Getting demu and dimg (libdos)"
+    if ($LibdosPath) {
+        $from = Join-Path (Resolve-Path $LibdosPath).Path "exe"
+        $what = "the libdos checkout in $LibdosPath"
+    } else {
+        $from = Join-Path $outputDir "tools\libdos-$libdosVersion"
+        $what = "libdos $libdosVersion"
+        if (-not (Test-Path (Join-Path $from "demu.exe")) -or -not (Test-Path (Join-Path $from "dimg.exe"))) {
+            $zipName = "libdos-$libdosVersion-win-x64.zip"
+            $zip = Join-Path $outputDir "tools\$zipName"
+            New-Item -ItemType Directory -Path (Split-Path $zip) -Force | Out-Null
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            $url = "https://github.com/ZacWalk/libdos/releases/download/$libdosVersion/$zipName"
+            Write-Host "  Downloading $url"
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+            $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+            if ($hash -ne $libdosSha256) {
+                Remove-Item $zip -Force
+                throw "$zipName has SHA-256 $hash, not the pinned $libdosSha256"
+            }
+            Expand-Archive -Path $zip -DestinationPath $from -Force
+            Remove-Item $zip -Force
+        }
     }
-    if (-not (Test-Path $dimgExe)) {
-        throw "dimg.exe not found in output/. Run .\make-tools.ps1 first."
+    foreach ($exe in "demu.exe", "dimg.exe") {
+        $path = Join-Path $from $exe
+        if (-not (Test-Path $path)) {
+            $hint = if ($LibdosPath) { " - build libdos first: .\dd.ps1 build release" } else { "" }
+            throw "$exe not found in $from$hint"
+        }
+        Copy-Item $path $outputDir -Force
     }
-    Write-Ok "demu.exe and dimg.exe found"
+    Write-Ok "demu.exe and dimg.exe from $what"
 }
 
 # ── Step 2: Set up environment ──────────────────────────────────────
@@ -116,7 +152,8 @@ function Invoke-Nmake($componentDir, $componentName) {
 
     Push-Location $componentDir
     try {
-        $output = & $demuExe (Join-Path $toolsDir "NMAKE.EXE") 2>&1 | Out-String
+        # -r: the repository is the emulated drive C:, wherever it is checked out
+        $output = & $demuExe -r $root (Join-Path $toolsDir "NMAKE.EXE") 2>&1 | Out-String
         $exitCode = $LASTEXITCODE
 
         $output | Out-File -FilePath $logFile -Encoding ASCII
@@ -140,37 +177,40 @@ function Invoke-Nmake($componentDir, $componentName) {
 }
 
 function Build-Component($name) {
-    # Build COMSUBS.LIB stub if needed before CMD
     if ($name -eq "cmd") {
-        $comsubsLib = Join-Path $srcDir "INC\COMSUBS.LIB"
-        $comsubsSrc = Join-Path $srcDir "INC\COMSUBS.C"
-        if ((Test-Path $comsubsSrc) -and -not (Test-Path $comsubsLib)) {
-            Push-Location (Join-Path $srcDir "INC")
-            try {
-                & $demuExe (Join-Path $toolsDir "CL.EXE") /c /AS /Gs COMSUBS.C 2>&1 | Out-Null
-                & $demuExe (Join-Path $toolsDir "LIB.EXE") "COMSUBS.LIB+COMSUBS.OBJ;" 2>&1 | Out-Null
-            } finally { Pop-Location }
-        }
         return Build-CmdSubdirs
     }
-    # Build CASSFAR stub if needed before SELECT
-    # Also ensure messages are built (select needs usa-ms.idx)
+    if ($name -eq "diskinfo") {
+        return Build-DiskInfo
+    }
+    # SELECT needs usa-ms.idx from the messages component
     if ($name -eq "select") {
         $msgIdx = Join-Path $srcDir "MESSAGES\usa-ms.idx"
         if (-not (Test-Path $msgIdx)) {
             Invoke-Nmake (Get-ComponentDir "messages") "messages" | Out-Null
         }
-        $selectDir = Get-ComponentDir "select"
-        $cassfarAsm = Join-Path $selectDir "CASSFAR.ASM"
-        if (Test-Path $cassfarAsm) {
-            # Assemble stub
-            Push-Location $selectDir
-            try {
-                & $demuExe (Join-Path $toolsDir "MASM.EXE") "-Mx -t CASSFAR.ASM,CASSFAR.OBJ;" 2>&1 | Out-Null
-            } finally { Pop-Location }
-        }
     }
     return Invoke-Nmake (Get-ComponentDir $name) $name
+}
+
+# DISKINFO.COM is new in 4.0z and is not built by the 1988 toolchain:
+# libdos's C compiler (demu --cc) turns its one C file into a .COM.
+function Build-DiskInfo {
+    Write-Step "Building diskinfo"
+    $dir = Get-ComponentDir "diskinfo"
+    $logFile = Join-Path $logDir "diskinfo.log"
+    New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    $output = & $demuExe --cc (Join-Path $dir "DISKINFO.C") -o (Join-Path $dir "DISKINFO.COM") 2>&1 | Out-String
+    $exitCode = $LASTEXITCODE
+    $output | Out-File -FilePath $logFile -Encoding ASCII
+    if ($Verbose) { Write-Host $output }
+    if ($exitCode -ne 0) {
+        Write-Host "  $output" -ForegroundColor Yellow
+        Write-Fail "diskinfo build failed (exit code $exitCode) — see $logFile"
+        return $false
+    }
+    Write-Ok "diskinfo built successfully"
+    return $true
 }
 
 # Build each CMD subdirectory individually to avoid deep exec nesting in demu.
@@ -203,7 +243,7 @@ function Build-CmdSubdirs {
 
         Push-Location $subDir
         try {
-            $output = & $demuExe (Join-Path $toolsDir "NMAKE.EXE") 2>&1 | Out-String
+            $output = & $demuExe -r $root (Join-Path $toolsDir "NMAKE.EXE") 2>&1 | Out-String
             $exitCode = $LASTEXITCODE
 
             "=== $sub ===" | Out-File -FilePath $logFile -Append -Encoding ASCII
@@ -232,12 +272,18 @@ function Build-CmdSubdirs {
 
 function Copy-Outputs {
     Write-Step "Collecting build outputs to output/bin/"
+    # A full build starts from an empty bin/ so a component that fails to
+    # build can't hide behind a stale binary from an earlier run.
+    if (-not $Component -and (Test-Path $binDir)) {
+        Remove-Item (Join-Path $binDir "*") -Force -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 
     $outputs = @(
         "bios\io.sys",
         "dos\msdos.sys",
         "boot\MSBOOT.BIN",
+        "cmd\fdisk\fdboot.bin",
         "cmd\append\append.exe",
         "cmd\assign\assign.com",
         "cmd\attrib\attrib.exe",
@@ -248,6 +294,7 @@ function Copy-Outputs {
         "cmd\debug\debug.com",
         "cmd\diskcomp\diskcomp.com",
         "cmd\diskcopy\diskcopy.com",
+        "cmd\diskinfo\diskinfo.com",
         "cmd\edlin\edlin.com",
         "cmd\exe2bin\exe2bin.exe",
         "cmd\fastopen\fastopen.exe",
@@ -301,19 +348,23 @@ function Copy-Outputs {
     )
 
     $copied = 0
-    $missing = 0
+    $missing = @()
     foreach ($rel in $outputs) {
         $src = Join-Path $srcDir $rel
         if (Test-Path $src) {
             Copy-Item $src (Join-Path $binDir (Split-Path $rel -Leaf)) -Force
             $copied++
         } else {
-            $missing++
-            if ($Verbose) { Write-Host "  Missing: $rel" -ForegroundColor DarkYellow }
+            $missing += $rel
         }
     }
 
-    Write-Ok "$copied files copied to output/bin/ ($missing not found)"
+    Write-Ok "$copied files copied to output/bin/ ($($missing.Count) not found)"
+    # After a single-component build the other components' outputs are
+    # expected to be missing (bin/ keeps them from the last full build).
+    if (-not $Component) {
+        foreach ($rel in $missing) { Write-Host "  Missing: $rel" -ForegroundColor DarkYellow }
+    }
 }
 
 # ── Step 5: Clean in-tree intermediates ─────────────────────────────
@@ -323,25 +374,20 @@ function Clean-IntreeArtifacts {
     $cleanExts = @("*.obj","*.exe","*.com","*.sys","*.bin","*.lib","*.lst",
                    "*.cl1","*.cl2","*.cl3","*.cl4","*.cl5","*.clf","*.ctl",
                    "*.map","*.tmp")
+    # Binaries shipped with the original source release; never delete them.
+    $keep = @("CMD\APPEND\SYSMAC.LIB", "DEV\XMAEM\INDEXMAE.SYS", "INC\COMSUBS.LIB",
+              "LIB\MEM.LIB", "SELECT\CASSFAR.LIB") |
+        ForEach-Object { (Join-Path $srcDir $_).ToUpperInvariant() }
     $removed = 0
 
-    foreach ($comp in $components) {
-        $dir = Get-ComponentDir $comp
-        if (Test-Path $dir) {
-            foreach ($ext in $cleanExts) {
-                $files = Get-ChildItem $dir -Recurse -Filter $ext -File -ErrorAction SilentlyContinue
-                $removed += $files.Count
-                $files | Remove-Item -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
-
-    # Also clean INC generated objects
-    $incDir = Join-Path $srcDir "INC"
-    if (Test-Path $incDir) {
+    $dirs = @($components | ForEach-Object { Get-ComponentDir $_ })
+    foreach ($dir in $dirs + (Join-Path $srcDir "INC")) {
+        if (-not (Test-Path $dir)) { continue }
+        $recurse = $dir -ne (Join-Path $srcDir "INC")
         foreach ($ext in $cleanExts) {
-            $files = Get-ChildItem $incDir -Filter $ext -File -ErrorAction SilentlyContinue
-            $removed += $files.Count
+            $files = Get-ChildItem $dir -Recurse:$recurse -Filter $ext -File -ErrorAction SilentlyContinue |
+                Where-Object { $keep -notcontains $_.FullName.ToUpperInvariant() }
+            $removed += @($files).Count
             $files | Remove-Item -Force -ErrorAction SilentlyContinue
         }
     }
@@ -356,9 +402,12 @@ function Clean-IntreeArtifacts {
 
 function Clean-All {
     Write-Step "Cleaning all build artifacts"
-    Get-Process demu -ErrorAction SilentlyContinue | Stop-Process -Force
+    # A demu an interrupted build left running holds its files open. Only this
+    # build's copy is stopped: demu is libdos's tool and may be in use elsewhere.
+    Get-Process demu -ErrorAction SilentlyContinue |
+        Where-Object { $_.Path -eq $demuExe } | Stop-Process -Force
     Clean-IntreeArtifacts
-    # Remove build artifacts but preserve pre-built tool binaries
+    # Remove build artifacts; output/tools, the libdos download, stays
     foreach ($sub in @("logs", "bin", "tmp")) {
         $p = Join-Path $outputDir $sub
         if (Test-Path $p) { Remove-Item $p -Recurse -Force }
@@ -390,12 +439,15 @@ function New-DiskImage {
         return
     }
 
-    # 360KB disk — include essential utilities
+    # 360KB disk — include essential utilities. SHARE.EXE is on it because
+    # SYSINIT loads it automatically when a partition is larger than 32 MB.
+    # DISKINFO.COM takes the last 2 KB of it.
     $img360 = Join-Path $outputDir "msdos4-360.img"
     $utils360 = @(
         "fdisk.exe", "format.com", "chkdsk.com", "sys.com",
         "debug.com", "edlin.com", "attrib.exe", "label.com",
-        "mode.com", "more.com", "find.exe", "sort.exe", "mem.exe"
+        "mode.com", "more.com", "find.exe", "sort.exe", "mem.exe",
+        "share.exe", "diskinfo.com"
     )
     $fArgs360 = @()
     foreach ($u in $utils360) {
@@ -422,7 +474,7 @@ function New-DiskImage {
         "fastopen.exe", "graphics.com", "graftabl.com", "keyb.com",
         "nlsfunc.exe", "share.exe", "country.sys", "ansi.sys",
         "display.sys", "driver.sys", "keyboard.sys", "printer.sys",
-        "ramdrive.sys", "ega.cpi"
+        "ramdrive.sys", "ega.cpi", "diskinfo.com"
     )
     $fArgs = @()
     foreach ($u in $utils) {
@@ -448,7 +500,7 @@ if ($Clean) {
     Clean-All
 }
 
-Check-Tools
+Get-LibdosTools
 Set-BuildEnvironment
 
 $failed = @()
@@ -489,3 +541,4 @@ if ($failed.Count -eq 0) {
 }
 Write-Host "Elapsed: $($elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor White
 Write-Host "Output:  $outputDir" -ForegroundColor White
+if ($failed.Count -ne 0) { exit 1 }

@@ -169,8 +169,7 @@ FAILGENERIC$IOCTL:
 IOCTL_FUNC_ERR:
 	JMP	CMDERR
 Cmd_Err_Proc:					;AN012;
-	pop	dx				;AN012;clear up stack
-	pop	dx				;AN012;clear up stack
+	pop	dx				;AN012;clear up stack (the CALL CS:[SI])
 	jmp	IOCTL_FUNC_ERR			;AN012;Cmd error
 ;
 ; GETDEVICEPARAMETERS:
@@ -395,11 +394,15 @@ Do_Set_Media_for_Format:
 ;SB33031****************************************************************
 	JC	FORMAT_STAT_ERR
 ; ES:DI POINTS TO A DISK BASE TABLE FOR THIS COMBINATION FOR THIS DRIVE.
+; Keep DS at segment 0 while the vector is replaced (an LDS here used to
+; switch DS to the old table's segment, so unless the table lived in
+; segment 0 the new pointer was written somewhere else).
 	XOR	CX,CX
 	MOV	DS,CX				; HAVE DS -> SEGMENT 0
-	LDS	SI,DWORD PTR DS:[DSKADR]	; GET CURRENT DISK BASE TABLE
+	MOV	SI,WORD PTR DS:[DSKADR] 	; GET CURRENT DISK BASE TABLE
+	MOV	CX,WORD PTR DS:[DSKADR+2]
 	MOV	WORD PTR CS:[TEMPDPT],SI
-	MOV	WORD PTR CS:[TEMPDPT+2],DS	; SAVE IT
+	MOV	WORD PTR CS:[TEMPDPT+2],CX	; SAVE IT
 	MOV	WORD PTR DS:[DSKADR],DI
 	MOV	WORD PTR DS:[DSKADR+2],ES	; REPLACE WITH ONE RETURNED BY ROM
 	MOV	BYTE PTR CS:[MEDIA_SET_FOR_FORMAT],1
