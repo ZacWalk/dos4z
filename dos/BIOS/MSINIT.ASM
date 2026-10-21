@@ -2058,16 +2058,6 @@ Massage_bpb:				;AN000;
 	mov	[di.DRVLIM], ax 	;AN000;
 	mov	[di.DRVLIM_L], 0	;AN000;
 GOODRET:
-	cmp	[di].DRVLIM_H, 0	;AN014; Big media?
-	jbe	Not_BigMedia		;AN014; No.
-	push	es			;AN014;
-	push	ax			;AN014;
-	mov	ax, SYSINITSEG		;AN014;
-	mov	es, ax			;AN014;
-	mov	es:Big_Media_Flag, 1	;AN014; Set the flag in SYSINITSEG.
-	pop	ax			;AN014;
-	pop	es			;AN014;
-Not_BigMedia:				;AN014;
 	MOV	BL,FBIGFAT
 	MOV	[DI].FATSIZ,BL		; SET SIZE OF FAT ON MEDIA
 	CLC

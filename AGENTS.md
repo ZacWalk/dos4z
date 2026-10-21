@@ -21,7 +21,7 @@ MS-DOS 4.00 source code (~95% x86 assembly, ~5% K&R C). Targets 8086 real-mode D
 - `docs/LARGE-DISKS.md` — how the LBA / large disk support works, IBM 5150 + XT-IDE notes, the boot tests and DOSBox testing
 - `tests/` — test programs for `test-boot.ps1`, written in the C libdos's compiler takes (`testfix.c` provokes each bug fix a program can see through INT 21h)
 - `make-dos.ps1` — build script for MS-DOS; gets demu and dimg from the pinned libdos release (or a checkout, `-LibdosPath`)
-- `test-boot.ps1` — boots the build with `demu --boot` (libdos's emulated IBM PC 5150, an 8088) and checks floppies, CHS and LBA hard disks, FDISK/FORMAT, unusual FAT layouts, DISKINFO and the bug fixes (`tests/testfix.c`, compiled by libdos's C compiler). Documented in `docs/LARGE-DISKS.md` ("Testing with demu --boot"); CI runs it after the build
+- `test-boot.ps1` — boots the build with `demu --boot` (libdos's emulated IBM PC 5150, an 8088) and checks floppies, CHS and LBA hard disks, FDISK/FORMAT, unusual FAT layouts, DISKINFO, the bug fixes (`tests/testfix.c`, compiled by libdos's C compiler) and COMMAND.COM's line editor and history (`KEYS.COM`, which the script writes from a byte array, queues the keys `demu --key` has no name for: Home, End, Ins, Del, ^C). Documented in `docs/LARGE-DISKS.md` ("Testing with demu --boot"); CI runs it after the build
 - `test-dosbox.ps1` — boots the build in DOSBox with a `dimg -hd` disk image, for trying things by hand. Its parameters and behaviour are documented only in `docs/LARGE-DISKS.md` ("Testing in DOSBox"), which its help points to; update both together
 - `output/` — `demu.exe` and `dimg.exe` (copied there by each build), `tools/` (the libdos download), `bin/`, `logs/`, `tmp/`, disk images; all of it untracked
 - `.github/workflows/build.yml` — CI: builds the whole OS on `windows-latest`, then runs `test-boot.ps1`
@@ -51,6 +51,8 @@ Known gaps and gotchas:
 - Original release binaries the build needs (`*.LIB`, the printer `*.CPI` files, `INDEXMAE.SYS`) are tracked through `.gitignore` exceptions and listed in `$keep` in `make-dos.ps1` so the in-tree clean leaves them alone. Do not replace them with stubs.
 - Batch files and `CONFIG.SYS` written for a DOS guest need CRLF line endings: COMMAND.COM reads an LF-only batch file as one long line (symptoms such as "File creation error"). PowerShell here-strings are LF-only.
 - DOSBox-X can drop the last write to a disk image before its window closes; write one more file before closing when a test reads results back from the image.
+- COMMAND.COM's memory layout: data its transient part changes belongs in TRANSPACE (`TSPC.ASM`), because the checksum that decides whether the transient must be loaded again from disk covers TRANCODE and TRANDATA; resident data belongs in `RDATA.ASM`'s DATARES before `DATARESEND`, because init frees the rest. The prompt's line editor (`TEDIT.ASM`) follows this: its state is in `TSPC.ASM` and the command history, `HistBuf`, in `RDATA.ASM`. Objects contributing to TRANSPACE link before `TSPC.OBJ`, which ends it with `TRANSPACEEND`.
+- The 360 KB image (`$utils360` in `make-dos.ps1`) has about 13 KB to spare. A bigger COMMAND.COM or another utility can overflow it, and the build then reports "360KB disk image creation failed".
 
 ## Build System
 

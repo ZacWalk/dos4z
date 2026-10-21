@@ -110,6 +110,9 @@ DATARES SEGMENT PUBLIC BYTE
 	PUBLIC	forptr
 	PUBLIC	fucase_addr		;AN000;
 	PUBLIC	HANDLE01
+	PUBLIC	HistBuf 		; 4.0z
+	PUBLIC	HistEnd 		; 4.0z
+	PUBLIC	HistTop 		; 4.0z
 	PUBLIC	IFFlag
 	PUBLIC	ignore_char
 	PUBLIC	In_Batch
@@ -570,6 +573,15 @@ TranVarEnd	LABEL	BYTE
 olderrno	dw	?
 
 RESMSGEND	DW	0			;AN000;; holds offset of msg end (end of resident)
+
+;
+; 4.0z: the command history.  The line editor of the interactive prompt
+; (TEDIT.ASM) keeps the lines typed at it here, oldest first, each ending in
+; a CR, so that they outlast the transient.
+;
+HistEnd 	DW	OFFSET ResGroup:HistBuf ; where the next line goes
+HistBuf 	DB	256 DUP (?)
+HistTop 	LABEL	BYTE			; the end of HistBuf
 
 .xlist
 .xcref

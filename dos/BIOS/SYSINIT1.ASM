@@ -148,9 +148,6 @@ ASSUME	CS:SYSINITSEG,DS:NOTHING,ES:NOTHING,SS:NOTHING
 	extrn	DeviceParameters:byte
 	extrn	DevMark_Addr:word
 	extrn	SetDevMarkFlag:byte
-	extrn	PathString:byte 			;AN021;
-	extrn	LShare:byte				;AN021;
-	extrn	ShareWarnMsg:byte			;AN021;
 
 	EXTRN	INT24:NEAR,MEM_ERR:NEAR
 	EXTRN	DOCONF:NEAR
@@ -170,7 +167,6 @@ ASSUME	CS:SYSINITSEG,DS:NOTHING,ES:NOTHING,SS:NOTHING
 	PUBLIC	SYSINIT
 	PUBLIC	CNTRYFILEHANDLE
 	PUBLIC	COMMAND_LINE
-	public	Big_Media_Flag				;AN021;Set by IBMINIT
 
 	IF	STACKSW
  ;Internal Stack Information
@@ -238,7 +234,6 @@ SYSI_Country		LABEL	DWORD		;J.K. 5/29/86 Pointer to
 
 Fake_Floppy_Drv 	db	0		;AN001;Set to 1 if this machine
 						;does not have any floppies!!!
-Big_Media_Flag		db	0		;AN021;Set by IBMINIT if > 32 MB fixed media exist.
 ;
 ;Variables for Stack Initialization Program.
 	IF	STACKSW
@@ -308,7 +303,6 @@ Multi_Pass_Id		db	0	;AN024;AN027;
 Install_Flag		dw	0	;AN000;
    HAVE_INSTALL_CMD	 equ	 00000001b ;AN019; CONFIG.SYS has INSTALL= commands
    HAS_INSTALLED	 equ	 00000010b ;AN019; SYSINIT_BASE installed.
-   SHARE_INSTALL	 equ	 00000100b ;AN021; Used to install SHARE.EXE
 
 Config_Size		dw	0	;AN000; size of config.sys file. Set by SYSCONF.ASM
 Sysinit_Base_Ptr	dd	0	;AN000; pointer to SYSINIT_BASE
@@ -660,7 +654,6 @@ NODRVSET:
 ;J.K. [AREA] has the segment address for the allocated memory of SYSINIT,CONFBOT.
 ;Free the CONFBOT area used for CONFIG.SYS and SYSINIT itself.
 DoLast:
-	call	LoadShare		;AN021; Try to load share.exe, if needed.
 	mov	cs:[DoNotShowNum], 1	;AN000; Done with CONFIG.SYS. Do not show line number message.
 	mov	cx, [area]		;AN000;
 	mov	es, cx			;AN000;
@@ -1821,21 +1814,16 @@ SYSINITPTR:					;AN000; returning far address from SYSINIT_BASE
 	pop	es				;AN000;
 	pop	ds				;AN000; now ds - sysinitseg, es - confbot
 	jnc	Exec_Exit_Code
-	test	cs:Install_Flag, SHARE_INSTALL	;AN021; Called by LoadShare proc?
-	jnz	Install_Error_Exit		;AN021; Just exit with carry set.
 	push	si				;AN000; Error in loading the file for INSTALL=.
 	call	BadLoad 			;AN000; ES:SI-> path,filename,0.
 	pop	si				;AN000;
 	jmp	Install_Exit_Ret
 Exec_Exit_Code:
-	test	cs:Install_Flag, SHARE_INSTALL	;AN021; Called by LoadShare proc?
-	jnz	Install_Exit_Ret		;AN021; Just exit.
 	mov	ah, 4dh 			;AN017;
 	int	21h				;AN017;
 	cmp	ah, 3				;AN017;Only accept "Stay Resident" prog.
 	je	Install_Exit_Ret		;AN017;
 	call	Error_Line			;AN017;Inform the user
-Install_Error_Exit:				;AN021;
 	stc					;AN021;
 Install_Exit_Ret:
 	ret
@@ -2599,69 +2587,6 @@ SetDevMark	proc
 	inc	cs:[memhi]			;AN005;
 	ret					;AN005;
 SetDevMark	endp
-
-;*******************************************************************************
-;Function: Load  SHARE.EXE, if Big_Media_Flag = 1 and SHARE.EXE has not been   *
-;	   loaded yet.							       *
-;	   This routine will use the same path for SHELL= command.	       *
-;	   If SHELL= command has not been entered, then default to the root    *
-;	   directory.							       *
-;	   If load fails, then issue message "Warning: SHARE.EXE not loaded"   *
-;									       *
-;Input:    Big_Media_Flag, COMMND					       *
-;Output:   Share.exe loaded if necessary.				       *
-;									       *
-;*******************************************************************************
-LoadShare	proc	near			;AN021;
-	cmp	Big_Media_Flag, 1		;AN021;
-	jne	LShare_Ret			;AN021;
-;Check if SHARE is already loaded.
-	mov	ax, 1000h			;AN021;multShare installation check
-	int	2fh				;AN021;
-	cmp	al, 0ffh			;AN021;
-	jz	LShare_Ret			;AN021;Share already loaded!
-;SHARE not loaded.
-	push	cs				;AN021;
-	pop	ds				;AN021;
-	push	cs				;AN021;
-	pop	es				;AN021;
-	mov	si, offset COMMND		;AN021;
-	mov	di, offset PathString		;AN021;
-LShare_String:					;AN021;
-	movsb					;AN021;
-	cmp	byte ptr [di-1], 0		;AN021;reached to the end?
-	jne	LShare_string			;AN021;
-	mov	si, offset PathString		;AN021;SI= start of PathString
-LShare_Tail:					;AN021;
-	dec	di				;AN021;
-	cmp	byte ptr [di], "\"		;AN021;
-	je	LShare_Got_Tail 		;AN021;
-	cmp	byte ptr [di], ":"		;AN021;
-	je	LShare_Got_Tail 		;AN021;
-	cmp	di, si				;AN021;No path case (e.g. SHELL=command.com)
-	je	LShare_Got_Tail_0		;AN021;
-	jmp	LShare_Tail			;AN021;
-LShare_Got_Tail:				;AN021;di -> "\" or ":"
-	inc	di				;AN021;
-LShare_Got_Tail_0:				;AN021;
-	mov	si, offset LShare		;AN021;
-LShare_Set_Filename:				;AN021;
-	movsb					;AN021;Tag "SHARE.EXE",0,0Ah to the path.
-	cmp	byte ptr [di-1], 0Ah		;AN021;Line feed?
-	jne	LShare_Set_Filename		;AN021;
-;Now, we got a path,filename with no parameters for SHARE.EXE
-	mov	si, offset PathString		;AN021;
-	or	Install_Flag, SHARE_INSTALL	;AN021;Signals Do_Install_Exec that this is for SHARE.EXE.
-	call	Do_Install_Exec 		;AN021;execute it.
-	jnc	LShare_Ret			;AN021;No problem
-;Load/Exec failed.  Show "Warning: SHARE should be loaded for large media"
-	push	cs				;AN021;
-	pop	ds				;AN021;
-	mov	dx, offset ShareWarnMsg 	;AN021;WARNING! SHARE should be loaded...
-	invoke	Print				;AN021;
-LShare_Ret:					;AN021;
-	ret					;AN021;
-LoadShare	endp				;AN021;
 
 SYSINITSEG	ENDS
 	   END

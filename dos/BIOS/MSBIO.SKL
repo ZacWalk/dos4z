@@ -113,9 +113,6 @@
 ;		 as it is.
 :def 15 ERRORCMD DB	"Error in CONFIG.SYS line ","$"
 
-;AN003; - PRINTED when SHARE.EXE is not loaded and has a large media > 32 MB.
-:def 23 SHAREWARNMSG db "WARNING! SHARE should be loaded for large media",13,10,"$"
-
 ;==================
 :class 4
 ;==================

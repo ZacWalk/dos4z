@@ -439,15 +439,14 @@ function New-DiskImage {
         return
     }
 
-    # 360KB disk — include essential utilities. SHARE.EXE is on it because
-    # SYSINIT loads it automatically when a partition is larger than 32 MB.
-    # DISKINFO.COM takes the last 2 KB of it.
+    # 360KB disk — the essential utilities. SHARE.EXE is left for the
+    # 1.44MB disk: DOS no longer needs it for partitions over 32 MB.
     $img360 = Join-Path $outputDir "msdos4-360.img"
     $utils360 = @(
         "fdisk.exe", "format.com", "chkdsk.com", "sys.com",
         "debug.com", "edlin.com", "attrib.exe", "label.com",
         "mode.com", "more.com", "find.exe", "sort.exe", "mem.exe",
-        "share.exe", "diskinfo.com"
+        "diskinfo.com"
     )
     $fArgs360 = @()
     foreach ($u in $utils360) {

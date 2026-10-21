@@ -9,9 +9,9 @@
 This is a fork of the MS-DOS 4.00 source code as released by Microsoft. It has been modified to build on a modern Windows 11 machine using the *original* DOS build tools. Those tools are 16-bit, so they run under **demu**, the command-line runner of [libdos](https://github.com/ZacWalk/libdos), my DOS emulator library. I actively use this version of DOS on my retro PCs and I am slowly adding features I need — `VER` reports **4.0z** so you can tell it apart.
 
 The main additions are support for large hard disks and CompactFlash cards (see
-[Large disk support](docs/LARGE-DISKS.md)) and a set of bug fixes, listed under
-[Changes from MS-DOS 4.00](#changes-from-ms-dos-400). Everything still runs on an 8088, so it
-boots on an IBM PC 5150.
+[Large disk support](docs/LARGE-DISKS.md)), command history at the prompt and a set of bug
+fixes, listed under [Changes from MS-DOS 4.00](#changes-from-ms-dos-400). Everything still runs
+on an 8088, so it boots on an IBM PC 5150.
 
 `make-dos.ps1` produces two bootable floppy images in `output/`, which you can boot in a PC emulator (86Box, PCem, DOSBox-X, VirtualBox, …) or write to real media.
 
@@ -67,9 +67,9 @@ again.
 
 `test-boot.ps1` boots the floppies and hard disk images in `demu --boot`, an emulated IBM PC
 5150 with an 8088, and runs commands on them: CHS and LBA hard disks up to 24 drives, FDISK and
-FORMAT on a blank disk, FAT layouts other systems make, DISKINFO, and a test program for the bug
-fixes. It takes seconds, needs no window, and stops at any instruction an 8088 does not have;
-CI runs it after every build. See
+FORMAT on a blank disk, FAT layouts other systems make, DISKINFO, a test program for the bug
+fixes, and the command line editor and history. It takes seconds, needs no window, and stops at
+any instruction an 8088 does not have; CI runs it after every build. See
 [Testing with demu --boot](docs/LARGE-DISKS.md#testing-with-demu---boot).
 
 `test-dosbox.ps1` is for trying things by hand: it creates the disk image with `dimg` and starts
@@ -89,6 +89,37 @@ first ~8 GB of a disk, and `dimg` sets up bigger CompactFlash cards on a PC. The
 `DISKINFO` command shows what a card's BIOS offers. The details, including card sizes, card
 set-up and notes for the IBM PC 5150 with an XT-IDE / XT-CF card, are in
 [docs/LARGE-DISKS.md](docs/LARGE-DISKS.md).
+
+DOS no longer needs SHARE.EXE for drives over 32 MB. MS-DOS 4.00 loaded it at start-up
+whenever it found one, at a cost of 6 KB of memory, because programs that open files with FCBs
+could not use such a drive without it; 4.0z keeps enough of the directory sector number in the
+FCB for the 2 GB of a FAT16 drive (see
+[FCBs without SHARE](docs/LARGE-DISKS.md#fcbs-without-share)). SHARE.EXE is still there for
+file sharing and locking.
+
+### Command history
+
+COMMAND.COM's prompt has a line editor with a history of the commands typed at it:
+
+| Key | Does |
+|-----|------|
+| Up, Down | Brings back an earlier or a later command |
+| Left, Right | Move the cursor; Right at the end of the line copies a character of the last command, as F1 does |
+| Home, End | Go to the start or the end of the line |
+| Backspace, Del | Delete the character before or at the cursor |
+| Ins | Inserts rather than overwrites, until Enter; the cursor does not change |
+| Esc | Clears the line |
+| F1, F3 | Copy one, or all the rest, of the last command from the cursor's place on |
+
+The history keeps the last 256 bytes of commands, about 20 of them, skipping empty lines and a
+command typed twice in a row; it stays in memory while programs run, and costs 256 bytes. Each
+copy of COMMAND.COM has its own, so a second one, started from a program, begins with none. The
+editor is in COMMAND.COM's transient part, which costs no memory while a program runs, and
+handles lines that wrap onto the next row, also in 40 columns. A Tab stays in the line, as
+before, but takes one column on the screen. The editor is used only at the prompt and only when
+input and output are the console: with input redirected or after CTTY, and in DATE, TIME, DEBUG,
+EDLIN and other programs, lines are read with INT 21h AH=0Ah and DOS's own editor as before.
+DOS's F2, F4 and F5 are not available at the prompt.
 
 ### Bug fixes
 
@@ -112,6 +143,7 @@ Most of these were found by E. C. Masloch while porting MS-DOS 4 to NASM for
 | SHARE | INT 2Fh with `AH=10h` and an unknown subfunction hung the machine; it is now passed on |
 | FDISK | Sizes were calculated in 16 bits and went wrong above 4 GB; partitions were not limited to what FAT16 can use; `/PRI`, `/EXT` and `/LOG` rejected sizes above 4000 MB |
 | FORMAT | "Divide overflow" on partitions with more than 65,535 tracks or starting more than ~2 GB into the disk |
+| RECOVER | On a FAT16 drive, a cluster it could not read made it look for the file's FCB inside its copy of the FAT and write to whatever DOS memory that pointed at. And without SHARE, a file whose first cluster could not be read was left starting at that cluster, now marked bad, because its FCB still held it |
 
 ### Source and build fixes
 

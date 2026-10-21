@@ -19,6 +19,7 @@ can use about 48 GB of any one disk (see [How big a card?](#how-big-a-card)).
 | Volumes formatted by other systems | Trusted only if the boot sector names MS-DOS, PC DOS or OS/2; others (Linux `mkfs.fat`, Windows 95, cameras) were assumed to have 1 reserved sector and 2 FATs, were read in the wrong place when they had not, and writes corrupted them | A boot sector that describes a FAT12/16 volume is used whatever system wrote it, with its reserved sectors and number of FATs |
 | FDISK | 16-bit size arithmetic (wrong above 4 GB); sizes on the command line limited to 4000 MB; creates partitions too big for FAT16 | 32-bit arithmetic; DOS partitions capped at 2047 MB; sizes up to 65535 MB |
 | FORMAT | "Divide overflow" when a partition has more than 65,535 tracks (2 GB with 255 heads) or starts more than ~2 GB into the disk | 32-bit track counts |
+| SHARE.EXE | Loaded at start-up, taking 6 KB of memory, whenever a drive is larger than 32 MB; without it, programs that open files with FCBs could not use such a drive | Never needed: FCBs work on drives of up to 2 GB without it ([FCBs without SHARE](#fcbs-without-share)) |
 
 ## How it works
 
@@ -113,6 +114,23 @@ do not use them.
   to LBA with the same geometry, so this works anywhere below cylinder 65,536 (about 500 GB
   with 255 heads).
 
+### FCBs without SHARE
+
+Programs written for DOS 1, and some ported from CP/M, open files with file control blocks
+(FCBs) rather than handles. DOS keeps a system file table entry for only a few FCBs at a time
+(`FCBS=`, 4 by default) and, when a program has more open, rebuilds an entry from what it
+stored in the FCB's reserved bytes, among them the number of the sector holding the file's
+directory entry. MS-DOS 4.00 stored only the low 16 bits of that number, enough for 32 MB, and
+refused to open an FCB further into a drive unless SHARE was loaded. So it loaded SHARE.EXE
+itself at start-up whenever a drive was bigger than 32 MB, at a cost of 6 KB of memory, and
+warned "SHARE should be loaded for large media" if it could not find it.
+
+4.0z keeps six more bits of the sector number in another of the FCB's reserved bytes, which
+covers the 2 GB of a FAT16 drive, so FCBs work on every drive without SHARE and IO.SYS no
+longer loads it. SHARE.EXE is still there for file sharing and locking (`INSTALL=` in
+CONFIG.SYS, or AUTOEXEC.BAT). With SHARE loaded, DOS cannot rebuild an FCB's entry, so a
+program with more FCBs open than `FCBS=` allows gets "FCB unavailable"; raise `FCBS=` then.
+
 ## IBM PC 5150 with an XT-IDE or XT-CF card
 
 ### Requirements
@@ -127,7 +145,7 @@ do not use them.
 - **Memory:** 256 KB at least. 640 KB is recommended, because CHKDSK needs a lot of memory
   on large FAT16 drives.
 - **Boot floppy:** `output/msdos4-360.img` for a 360 KB 5¼" drive. It has FDISK, FORMAT,
-  SYS, CHKDSK, SHARE, MEM, DEBUG, DISKINFO and the other essentials, and is full.
+  SYS, CHKDSK, MEM, DEBUG, DISKINFO and the other essentials. SHARE.EXE is not needed.
 
 ### How big a card?
 
@@ -207,10 +225,7 @@ cards are the safest choice. Try a card before you trust data to it.
    first logical drive. Repeat the second line for more logical drives. A size larger than
    the free space takes all of it.
 3. Restart from the floppy, then run `FORMAT C: /S` and `FORMAT D:` and so on.
-4. Copy `SHARE.EXE` to `C:\`. DOS 4 loads it automatically when a partition is larger than
-   32 MB, looking in the root of the boot drive (or the `SHELL=` directory). Without it, DOS
-   warns "SHARE should be loaded for large media" at start-up.
-5. Remove the floppy and start from the card.
+4. Remove the floppy and start from the card.
 
 ### Setting up a card larger than 8 GB
 
@@ -231,7 +246,7 @@ and written to the card in one go. This erases everything on the card.
    that shows 30,520 MB:
 
    ```powershell
-   output\dimg.exe -o card.img -b output\bin -hd 30500 -p 2047 -lba -l CARD -f output\bin\share.exe -f output\bin\format.com -f output\bin\chkdsk.com -f output\bin\sys.com -f output\bin\mem.exe
+   output\dimg.exe -o card.img -b output\bin -hd 30500 -p 2047 -lba -l CARD -f output\bin\format.com -f output\bin\chkdsk.com -f output\bin\sys.com -f output\bin\mem.exe
    ```
 
    - `-hd` is the image size in MB and must not be more than the card's. For a card bigger
@@ -240,8 +255,7 @@ and written to the card in one go. This erases everything on the card.
    - `-p` is the drive size in MB (at most 2047).
    - `-lba` gives the partitions types 0Eh and 0Fh, so DOS versions without LBA support skip
      them instead of misreading them.
-   - Every drive is formatted. C: gets the system files and the `-f` files; SHARE.EXE must be
-     among them.
+   - Every drive is formatted. C: gets the system files and the `-f` files.
 4. Optionally, check the image: `output\dimg.exe -dir card.img` lists every drive with its
    size and free space, and the files on C:. Or boot it in libdos's emulated 5150, with the
    INT 13h extensions an XT-IDE BIOS with LBA gives, and look at the last drive:
@@ -295,7 +309,8 @@ need no window, and CI runs them after every build. Build DOS with `.\make-dos.p
 | `fdisk-format` | `FDISK 1 /PRI /EXT /LOG` on a blank disk, a restart, `FORMAT C: /S` and `FORMAT D:`, the result read back with `dimg -dir`, then booting from C: |
 | `odd-fat` | Volumes laid out as Linux `mkfs.fat` makes them: C: with 8 reserved sectors, D: with 4 and a single FAT and `mkfs.fat`'s name in its boot sector. TYPE, COPY onto D: and CHKDSK, then the copy read back with `dimg -extract` |
 | `diskinfo` | `DISKINFO` from the 360 KB floppy, asking a 49 GB disk's BIOS with the INT 13h extensions and without them |
-| `fixes` | The bug fixes a program can see: `tests\testfix.c`, compiled by libdos's C compiler, provokes each through INT 21h on a 2 GB volume (AH=47h, a label search for CON, 5D00h, IOCTL 0863h, a write past cluster 65535), CHKDSK checks the volume after, and DEBUG sends SHARE an INT 2Fh call it does not know |
+| `fixes` | The bug fixes a program can see: `tests\testfix.c`, compiled by libdos's C compiler, provokes each through INT 21h on a 2 GB volume (AH=47h, a label search for CON, 5D00h, IOCTL 0863h, a write past cluster 65535, and FCB I/O on six files at once in a directory past sector 65535, without SHARE). CHKDSK checks the volume after, then SHARE is loaded - it must not say "already installed" - and DEBUG sends it an INT 2Fh call it does not know |
+| `history` | COMMAND.COM's line editor and history: recalling with Up and Down, editing with the cursor keys, Backspace, Esc, F1 and F3, and, through `KEYS.COM` (which the script makes, to put the keys demu has no name for in the BIOS keyboard buffer), Home, End, Ins, Del and ^C. Then the history after DEBUG overwrites the transient, a second COMMAND reading its commands from a file, and the oldest lines going when the history is full |
 
 ```powershell
 .\test-boot.ps1                        # all of them
@@ -314,8 +329,9 @@ output\demu.exe --boot -a output\msdos4-360.img --snapshot --expect "new date" -
   partition table was made for (dimg's, or FDISK's), unless `--chs <heads>,<sectors>` gives
   another (up to 256 heads), and `--no-lba` takes the INT 13h extensions away.
 - `--expect` waits for text on the console after what the last one matched. `--line` types a
-  command and presses Enter, `--type` types without Enter, `--key` presses Enter, Esc, an arrow
-  or a function key, and `--reboot` restarts the machine with the disks as they now are.
+  command and presses Enter, `--type` types without Enter, `--key` presses Enter, Esc, Tab,
+  Backspace, an arrow or a function key, and `--reboot` restarts the machine with the disks as
+  they now are.
 - `--snapshot` leaves the images as they were; without it, what DOS writes goes into them.
 - `--screen` prints the screen at the end and `--log <file>` writes everything the console
   showed.
@@ -336,7 +352,7 @@ with `.\make-dos.ps1` first.
 | `-DosBox` | search | DOSBox or DOSBox-X to run. Without it, the usual install folders of DOSBox 0.74-3 and DOSBox-X are tried, then `PATH` |
 
 The image is `output\hd-<size>mb.img` (`hd-<size>mb-lba.img` with `-Lba`). Its C: holds the
-system files, an `AUTOEXEC.BAT`, SHARE, CHKDSK, FDISK, FORMAT and MEM. The image is reused as
+system files, an `AUTOEXEC.BAT`, CHKDSK, FDISK, FORMAT and MEM. The image is reused as
 long as its size matches, so pass `-New` after rebuilding DOS to pick up the new files.
 
 ```powershell
@@ -410,4 +426,5 @@ dimg -extract <image> <path> <file>
 | `dos/CMD/FDISK/` | `CONVERT.C` size arithmetic, `SPACE.C` 2047 MB cap, `FDPARSE.C` switch ranges |
 | `dos/CMD/FORMAT/FORMAT.ASM` | 32-bit track counts (`Phase2Initialisation` and the format loop) |
 | `dos/CMD/DISKINFO/DISKINFO.C` | What the BIOS says about each hard disk; built with libdos's C compiler |
+| `dos/DOS/FCBIO.ASM`, `FCBIO2.ASM` | `NslBits`, `SaveFCBInfo`, `FCBRegen`, `CheckFCB`, `$FCB_Open`: the directory sector's high bits in an FCB, for FCBs without SHARE |
 | `disk/disk-image.cpp` in [libdos](https://github.com/ZacWalk/libdos) | `disk_build_hard_disk`: dimg's partitions and volumes |

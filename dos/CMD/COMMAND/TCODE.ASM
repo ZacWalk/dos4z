@@ -356,9 +356,7 @@ REGCOM:
 
 	PUSH	CS
 	POP	DS				; Need local segment to point to buffer
-	MOV	DX,OFFSET TRANGROUP:UCOMBUF
-	MOV	AH,STD_CON_STRING_INPUT
-	INT	int_command			; Get a command
+	INVOKE	EditLine			; 4.0z: Get a command, with history
 	MOV	CL,[UCOMBUF]
 	XOR	CH,CH
 	ADD	CX,3

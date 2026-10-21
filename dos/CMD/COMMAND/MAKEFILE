@@ -91,6 +91,8 @@ tdata.obj:  tdata.asm comsw.asm comseg.asm $(inc)\curdir.inc \
     $(inc)\msgserv.asm tranmsg.asm command.clf command.cl1 command.cl2 \
     command.ctl  $(inc)\ea.inc
 
+tedit.obj:  tedit.asm comsw.asm $(inc)\dossym.inc comseg.asm comequ.asm
+
 tenv.obj:  tenv.asm comsw.asm $(inc)\dossym.inc $(inc)\devsym.inc \
     comseg.asm comequ.asm ifequ.asm $(inc)\doscntry.inc
 
@@ -128,7 +130,7 @@ command.com:  command1.obj command2.obj rucode.obj rdata.obj init.obj iparse.obj
     uinit.obj tcode.obj tbatch.obj tbatch2.obj tfor.obj tcmd1a.obj tcmd1b.obj \
     tcmd2a.obj tcmd2b.obj tenv.obj tenv2.obj tmisc1.obj tmisc2.obj tpipe.obj \
     parse2.obj path1.obj path2.obj tucode.obj copy.obj copypr1.obj copypr2.obj \
-    cparse.obj tparse.obj tprintf.obj tdata.obj tspc.obj
+    cparse.obj tparse.obj tprintf.obj tedit.obj tdata.obj tspc.obj
 	link @command.lnk
 	exe2bin command.exe command.com
 	del command.exe

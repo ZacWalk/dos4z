@@ -24,7 +24,6 @@ SYSINITSEG	SEGMENT PUBLIC BYTE 'SYSTEM_INIT'
 	PUBLIC	INSUFMEMORY,BADCOUNTRYCOM
 	public	BadOrder,Errorcmd		;AN000;
 	public	BadParm 			;AN001;
-	public	SHAREWARNMSG			;AN003;
 
 
 ;include sysimes.inc

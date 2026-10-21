@@ -104,8 +104,6 @@ ASSUME	CS:SYSINITSEG,DS:NOTHING,ES:NOTHING,SS:NOTHING
 	PUBLIC Skip_delim,SetDOSCountryInfo,Set_Country_Path,Move_Asciiz
 	PUBLIC Cntry_Drv,Cntry_Root,Cntry_Path
 	PUBLIC Delim
-	public PathString				;AN014;
-	public LShare					;AN014;
 
 ;
 ; The following set of routines is used to parse the DRIVPARM = command in
@@ -1506,10 +1504,6 @@ CntryCodePage_Id DW ?
 
 COMMND	DB	"\COMMAND.COM",0
 	DB	51 dup (0)
-
-PathString db	64 dup (0)		;AN014;
-LShare	db	"SHARE.EXE",0,"/NC",0Dh,0Ah ;AN014;AN015;To be used by Load/exec.
-					;/NC parm will disable file sharing check.
 
 COMTAB	LABEL	BYTE
 ;;;;	   DB	   8,"AVAILDEV",'A'     ; NO LONGER SUPPORTED

@@ -82,6 +82,15 @@ TRANSPACE	SEGMENT PUBLIC BYTE
 	PUBLIC	DRIVE_OUTPUT		;AN000;
 	PUBLIC	DRIVE_TYPE		;AN000;
 	PUBLIC	DRIVE_VALUE		;AN000;
+	PUBLIC	EdCol			; 4.0z
+	PUBLIC	EdCols			; 4.0z
+	PUBLIC	EdHist			; 4.0z
+	PUBLIC	EdIns			; 4.0z
+	PUBLIC	EdLen			; 4.0z
+	PUBLIC	EdPage			; 4.0z
+	PUBLIC	EdPos			; 4.0z
+	PUBLIC	EdRow			; 4.0z
+	PUBLIC	EdShown 		; 4.0z
 	PUBLIC	ELCNT
 	PUBLIC	ELPOS
 	PUBLIC	EXECPATH
@@ -481,6 +490,19 @@ DRIVE_VALUE	DB	0			;AN000;  return value
 		DW	0			;AN000;  es offset of synonym
 DRIVE_NUMBER	DB	0			;AN000;  drive number
 		DB	0,0,0			;AN000;  reserved
+
+;
+; 4.0z: the line editor's state (TEDIT.ASM), for the line being typed
+;
+EdLen		DB	?			; characters in the line
+EdPos		DB	?			; where the cursor is in it
+EdShown 	DB	?			; characters of it on the screen
+EdIns		DB	?			; non-zero to insert, not overwrite
+EdRow		DB	?			; where on the screen the line starts
+EdCol		DB	?
+EdCols		DB	?			; columns on the screen
+EdPage		DB	?			; video page
+EdHist		DW	?			; history entry shown, or HistEnd
 
 TRANSPACEEND	LABEL	BYTE
 

@@ -51,10 +51,52 @@ function New-HardDisk([string]$Name, [string[]]$Arguments) {
     $autoexec = Join-Path $work "AUTOEXEC.BAT"
     [IO.File]::WriteAllText($autoexec, "@ECHO OFF`r`nPROMPT `$P`$G`r`nVER`r`n")
     $files = @("-f", $autoexec)
-    foreach ($f in "share.exe", "chkdsk.com", "mem.exe") { $files += @("-f", (Join-Path $bin $f)) }
+    foreach ($f in "chkdsk.com", "mem.exe") { $files += @("-f", (Join-Path $bin $f)) }
     $output = & $dimg -o $image -b $bin -l DOS4Z @Arguments @files 2>&1
     if ($LASTEXITCODE -ne 0) { throw "dimg failed: $($output -join "`n")" }
     return $image
+}
+
+# KEYS.COM puts keystrokes in the BIOS keyboard buffer (40:1Eh, tail at 40:1Ch)
+# for COMMAND.COM's line editor to read once KEYS has ended: the keys demu has
+# no name for. Each character of its command line is a key, but ~X is the
+# extended key with scan code X (~G Home, ~O End, ~R Ins, ~S Del, ~K Left, ~H
+# Up) and ^X the control character (^M Enter, ^C). At most 15 keys fit.
+function New-KeysCom {
+    $path = Join-Path $work "KEYS.COM"
+    [IO.File]::WriteAllBytes($path, [byte[]](
+        0xBE, 0x81, 0x00,           #         mov  si,81h       ; the command line
+        0xB8, 0x40, 0x00,           #         mov  ax,40h
+        0x8E, 0xC0,                 #         mov  es,ax        ; the BIOS data area
+        0xFC,                       #         cld
+        0xAC,                       # skip:   lodsb
+        0x3C, 0x20,                 #         cmp  al,' '
+        0x74, 0xFB,                 #         je   skip
+        0x3C, 0x0D,                 # next:   cmp  al,0Dh
+        0x74, 0x2C,                 #         je   done
+        0x32, 0xE4,                 #         xor  ah,ah        ; a character
+        0x3C, 0x7E,                 #         cmp  al,'~'
+        0x75, 0x07,                 #         jne  control
+        0xAC,                       #         lodsb             ; ~X: scan code X
+        0x8A, 0xE0,                 #         mov  ah,al
+        0x32, 0xC0,                 #         xor  al,al
+        0xEB, 0x07,                 #         jmp  short store
+        0x3C, 0x5E,                 # control: cmp al,'^'
+        0x75, 0x03,                 #         jne  store
+        0xAC,                       #         lodsb             ; ^X: control X
+        0x24, 0x1F,                 #         and  al,1Fh
+        0xFA,                       # store:  cli
+        0x26, 0x8B, 0x3E, 0x1C, 0x00, #       mov  di,es:[1Ch]  ; the buffer's tail
+        0xAB,                       #         stosw
+        0x83, 0xFF, 0x3E,           #         cmp  di,3Eh
+        0x72, 0x03,                 #         jb   wrapped
+        0xBF, 0x1E, 0x00,           #         mov  di,1Eh
+        0x26, 0x89, 0x3E, 0x1C, 0x00, # wrapped: mov es:[1Ch],di
+        0xFB,                       #         sti
+        0xAC,                       #         lodsb
+        0xEB, 0xD0,                 #         jmp  next
+        0xCD, 0x20))                # done:   int  20h
+    return $path
 }
 
 function Copy-Floppy {
@@ -284,8 +326,11 @@ $tests = [ordered]@{
     "fixes" = {
         # The bug fixes a program can see. TESTFIX (tests\testfix.c, compiled
         # here by libdos's C compiler) provokes each through INT 21h, with C: a
-        # 2 GB volume; DEBUG then sends SHARE an INT 2Fh call it does not know,
-        # which used to hang the machine.
+        # 2 GB volume, among them FCB I/O there, which needed SHARE in MS-DOS
+        # 4.00: SHARE.EXE is on the floppy, but nothing loads it until the
+        # SHARE line, so it would say "already installed" had IO.SYS loaded it.
+        # CHKDSK then finds C: as TESTFIX left it, and DEBUG sends SHARE an
+        # INT 2Fh call it does not know, which used to hang the machine.
         $testfix = Join-Path $work "TESTFIX.COM"
         $output = & $demu --cc (Join-Path $PSScriptRoot "tests\testfix.c") -o $testfix 2>&1
         if ($LASTEXITCODE -ne 0) { throw "tests\testfix.c does not compile: $($output -join "`n")" }
@@ -296,13 +341,66 @@ $tests = [ordered]@{
         if ($LASTEXITCODE -ne 0) { throw "dimg failed: $($output -join "`n")" }
         $disk = New-HardDisk "fixes" @("-hd", "2100", "-p", "2047", "-nosys")
         Invoke-Boot "fixes" (@("-a", $floppy, "-c", $disk) + $dateAndTime + @(
-            "--expect", "A>", "--line", "share", "--expect", "A>",
-            "--line", "testfix", "--expect", "TESTFIX:", "--expect", " passed, 0 failed", "--expect", "A>",
+            "--expect", "A>", "--line", "testfix", "--expect", "TESTFIX:", "--expect", " passed, 0 failed", "--expect", "A>",
             "--line", "chkdsk c:", "--expect", "bytes available on disk", "--expect", "A>",
+            "--line", "share", "--expect", "A>",
             "--line", "debug", "--expect", "-", "--line", "a 100", "--line", "mov ax,1001", "--line", "int 2f",
             "--line", "int 3", "--key", "enter", "--line", "g=100", "--expect", "AX=", "--line", "q",
             "--expect", "A>"))
+        $log = [IO.File]::ReadAllText((Join-Path $work "fixes.log"))
+        foreach ($text in "already installed", "lost allocation units", "Errors found") {
+            if ($log.Contains($text)) { throw "fixes.log says '$text'" }
+        }
         Remove-Item $disk, $floppy, $testfix
+    }
+    "history" = {
+        # COMMAND.COM's line editor and history. demu presses the keys it has
+        # names for, and KEYS.COM the others. Each line run is VER unless an
+        # edit went wrong, so the log must show "Version 4.0z" once for each
+        # step that expects it and never "Bad command or file name". Between
+        # them: DEBUG overwrites the transient, which COMMAND loads again from
+        # the floppy, and a second COMMAND reads its commands from CMDS.TXT.
+        # Last, twelve 24-character REM lines fill the history's 256 bytes, so
+        # Up cannot reach a VER line any more.
+        $keys = New-KeysCom
+        $commands = Join-Path $work "CMDS.TXT"
+        [IO.File]::WriteAllText($commands, "ver`r`nexit`r`n")
+        $floppy = Join-Path $work "history.img"
+        $output = & $dimg -o $floppy -b $bin -s 1440 -f $keys -f $commands -f (Join-Path $bin "debug.com") 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "dimg failed: $($output -join "`n")" }
+        $ver = @("--expect", "Version 4.0z", "--expect", "A>")
+        $vol = @("--expect", "Volume in drive A", "--expect", "A>")
+        $steps = @("-a", $floppy) + $dateAndTime + @("--expect", "A>",
+            "--line", "ver") + $ver + @("--line", "vol") + $vol + @(
+            "--key", "up", "--key", "up", "--key", "enter") + $ver + @(
+            "--key", "up", "--key", "up", "--key", "up", "--key", "down", "--key", "down", "--key", "enter") + $ver + @(
+            "--key", "up", "--key", "down", "--line", "ver") + $ver + @(
+            "--type", "verx", "--key", "backspace", "--key", "enter") + $ver + @(
+            "--type", "vxr", "--key", "left", "--key", "left", "--type", "e", "--key", "enter") + $ver + @(
+            "--type", "garbage", "--key", "esc", "--line", "ver") + $ver + @(
+            "--key", "f3", "--key", "enter") + $ver + @(
+            "--type", "v", "--key", "f1", "--key", "right", "--key", "enter") + $ver + @(
+            "--line", "keys xver~G~S^M") + $ver + @(
+            "--line", "keys vr~K~Re^M") + $ver + @(
+            "--line", "keys ve~G~Or^M") + $ver + @(
+            "--type", "vol", "--key", "tab", "--line", "a:") + $vol + @(
+            "--line", "keys garbage^C", "--expect", "keys garbage^C", "--expect", "garbage^C", "--expect", "A>",
+            "--line", "ver") + $ver + @(
+            "--line", "vol") + $vol + @("--line", "vol") + $vol + @(
+            "--key", "up", "--key", "up", "--key", "enter") + $ver + @(
+            "--line", "debug", "--expect", "-", "--line", "f 9000:0 ffff 0", "--expect", "-", "--line", "q",
+            "--expect", "A>", "--key", "up", "--key", "up", "--key", "enter") + $ver + @(
+            "--line", "command < cmds.txt", "--expect", "Version 4.0z") + $ver
+        for ($i = 10; $i -lt 22; $i++) { $steps += @("--line", "rem $i abcdefghijklmnopq", "--expect", "A>") }
+        for ($i = 0; $i -lt 12; $i++) { $steps += @("--key", "up") }
+        $steps += @("--key", "enter", "--expect", "A>", "--line", "vol") + $vol
+        Invoke-Boot "history" $steps
+        $log = [IO.File]::ReadAllText((Join-Path $work "history.log"))
+        if ($log.Contains("Bad command or file name")) { throw "history.log says 'Bad command or file name'" }
+        $expected = @($steps | Where-Object { $_ -eq "Version 4.0z" }).Count + 1
+        $count = ([regex]::Matches($log, "Version 4\.0z")).Count
+        if ($count -ne $expected) { throw "history.log says 'Version 4.0z' $count times, not $expected" }
+        Remove-Item $floppy, $keys, $commands
     }
 }
 

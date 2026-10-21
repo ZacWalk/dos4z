@@ -82,7 +82,9 @@ fcb_net_handle  EQU     WORD PTR fcb_reserved+2
 fcb_netID       EQU     DWORD PTR fcb_reserved+4
 
 ;
-; No sharing local file FCB
+; No sharing local file FCB.  In 4.0z the bits byte holds bits 16-21 of the
+; directory sector (0-5), devid_file_clean (6) and whether the file is open
+; for reading only (7); see NslBits in FCBIO.ASM.
 ;
 fcb_nsl_drive   EQU     BYTE PTR fcb_reserved+1
 fcb_nsl_bits    EQU     BYTE PTR fcb_reserved+2

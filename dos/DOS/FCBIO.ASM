@@ -12,6 +12,7 @@ NAME	FCBIO
 ;   $FCB_CLOSE		    written close   none
 ;   $FCB_RENAME 	    written none    none
 ;   SaveFCBInfo
+;   NslBits
 ;   ResetLRU
 ;   SetOpenAge
 ;   LRUFCB
@@ -455,10 +456,13 @@ SaveNoShare:
 	MOV	[SI].fcb_nsl_dirpos,AL
 	MOV	AX,ES:[DI].sf_firclus	; first cluster
 	MOV	[SI].fcb_nsl_firclus,AX
+	CALL	NslBits 		; 4.0z: with the sector's high bits
+	MOV	[SI].fcb_nsl_bits,BL
 	MOV	BL,00
+	JMP	SaveSFN
 ;
-; Create the bits field from the dirty/device bits of the flags word and the
-; mode byte
+; Create the bits field of a device from the dirty/device bits of the flags
+; word and the mode byte
 ;
 SetFCBBits:
 	MOV	AX,ES:[DI].sf_flags
@@ -521,6 +525,38 @@ SimpleStuff:
 	MOV	FCBLRU,AX
 	return
 EndProc SaveFCBInfo
+
+Break	<NslBits - the bits byte of a local file FCB without sharing>
+
+;
+;   NslBits - 4.0z: the fcb_nsl_bits byte of a local file opened by FCB
+;	when SHARE is not loaded.  MS-DOS 4.00 kept only the low 16 bits of
+;	the directory sector in the FCB, so FCB I/O on a volume over 32 MB
+;	needed SHARE.  The byte now holds the sector's bits 16-21 as well,
+;	which covers the 2 GB of a FAT16 volume:
+;
+;	    bits 0-5	bits 16-21 of the directory sector
+;	    bit 6	devid_file_clean, as before (RECOVER clears it)
+;	    bit 7	set if the file is open for reading only, as a
+;			read-only file is; an FCB is otherwise open for both
+;
+;   Inputs:	ES:DI point to the SFT
+;   Outputs:	BL is the bits byte
+;   Registers modified: BX
+
+Procedure   NslBits,NEAR
+	ASSUME	CS:DOSGroup,DS:NOTHING,ES:NOTHING,SS:NOTHING
+	MOV	BL,BYTE PTR ES:[DI].sf_dirsec+2
+	AND	BL,3Fh
+	MOV	BH,BYTE PTR ES:[DI].sf_flags
+	AND	BH,devid_file_clean
+	OR	BL,BH
+	TEST	BYTE PTR ES:[DI].sf_mode,access_mask
+	JNZ	NslDone 		; open for both
+	OR	BL,80h			; open for reading only
+NslDone:
+	return
+EndProc NslBits
 
 Break	<ResetLRU - reset overflowed lru counts>
 
@@ -852,16 +888,30 @@ RegenNoSharing:
 	AND	AL,3Fh			; get drive number for flags
 	CBW
 	OR	AX,sf_close_noDate	; normal FCB operation
-;
-; The bits field consists of the upper two bits (dirty and device) from the
-; SFT and the low 4 bits from the open mode.
-;
-	MOV	CL,[SI].FCB_nsl_bits	; stick in dirty bits.
+	MOV	CL,[SI].FCB_nsl_bits
 	MOV	CH,CL
+	TEST	[SI].fcb_l_drive,FCBDEVICE
+	JNZ	RegenDevBits
+;
+; 4.0z: a file's bits field has the dirty bit, whether it is open for
+; reading only and the high bits of its directory sector (see NslBits).
+;
+	AND	CH,devid_file_clean
+	OR	AL,CH
+	TEST	CL,80h
+	JZ	RegenFlags		; open for both, as set above
+	MOV	BYTE PTR ES:[DI].sf_mode,open_for_read
+	JMP	SHORT RegenFlags
+;
+; A device's bits field consists of the upper two bits (dirty and device)
+; from the SFT and the low 4 bits from the open mode.
+;
+RegenDevBits:
 	AND	CH,0C0h 		; mask off the dirty/device bits
 	OR	AL,CH
 	AND	CL,access_mask		; get the mode bits
 	MOV	BYTE PTR ES:[DI].sf_mode,CL
+RegenFlags:
 	MOV	ES:[DI].sf_flags,AX	; initial flags
 	MOV	AX,Proc_ID
 	MOV	ES:[DI].sf_PID,AX
@@ -925,7 +975,9 @@ RegenFileNoSharing:
 					; indicator was bogus
 	MOV	AX,[SI].FCB_nsl_dirsec
 	MOV	WORD PTR ES:[DI].sf_dirsec,AX
-	MOV	WORD PTR ES:[DI].sf_dirsec+2,0	;AN000;>32mb
+	MOV	AL,[SI].FCB_nsl_bits	; 4.0z: and the sector's high bits
+	AND	AX,3Fh
+	MOV	WORD PTR ES:[DI].sf_dirsec+2,AX
 	MOV	AX,[SI].FCB_nsl_firclus
 	MOV	ES:[DI].sf_firclus,AX
 	MOV	ES:[DI].sf_lstclus,AX
@@ -1068,25 +1120,20 @@ CheckNoShare:
 ; Check no sharing local file
 ;
 	MOV	BX,[SI].FCB_nsl_Dirsec
-	CMP	WORD PTR ES:[DI].sf_dirsec+2,0	;AN000;F.C. >32mb
-	JNZ	BadSFt				;AN000;F.C. >32mb
-
-	CMP	BX,WORD PTR ES:[DI].sf_dirsec	;AN000;F.C. >32mb
+	CMP	BX,WORD PTR ES:[DI].sf_dirsec
 	JNZ	BadSFT
 	MOV	BL,[SI].FCB_nsl_Dirpos
 	CMP	BL,ES:[DI].sf_dirpos
 	JNZ	BadSFt
 ;
-; Since the bits field comes from two different spots, compare them separately.
+; 4.0z: the bits field holds the sector's high bits, the dirty bit and the
+; access mode (see NslBits); a device's SFT is never a file's.
 ;
-	MOV	BL,[SI].FCB_nsl_bits
-	MOV	BH,BYTE PTR ES:[DI].sf_flags
-	XOR	BH,BL
-	AND	BH,0C0h
-	JNZ	BadSFT			; dirty/device bits are different
-	XOR	BL,BYTE PTR ES:[DI].sf_mode
-	AND	BL,access_mask
-	JNZ	BadSFT			; access modes are different
+	TEST	BYTE PTR ES:[DI].sf_flags,devid_device
+	JNZ	BadSFT
+	CALL	NslBits
+	CMP	BL,[SI].FCB_nsl_bits
+	JNZ	BadSFT			; sector, dirty bit or access differ
 ; Make sure that the names are the same in the FCB and the SFT
 ; This case can appear under the following scenario:
 ;		Create	FOO

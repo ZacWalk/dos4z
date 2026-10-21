@@ -1227,10 +1227,17 @@ Procedure Bad_File_Read,Near
 ;	    $ENDIF			; because the first one is bad!       ;AN000;
 $$IF74:
 	    SaveReg <ES,DI,BX>		;Save some info
+	    push    ds			;4.0z: the FCB is in DS; GETFAT left ES
+	    pop     es			; in the FAT table on a 16-bit FAT
 	    call    sfFromFCB		;Get pointer to sf table
 	    RestoreReg <BX>		;Get back clus to point to
 	    mov     ES:[DI].sf_firclus,BX ;Skip offending cluster
 	    RestoreReg <DI,ES>		;Get back regs
+	    lea     di,fcb_copy 	;4.0z: an FCB without SHARE keeps the
+	    test    [di].fcb_nsl_drive,0C0h ; first cluster too, and closing
+	    jnz     KeepFirClus 	;  it checks that against the SFT's,
+	    mov     [di].fcb_nsl_firclus,BX ;  so it must move on as well
+KeepFirClus:
 ;	$ELSE				;Not first entry in chain	;AC000;
 	JMP SHORT $$EN73
 $$IF73:
@@ -1254,6 +1261,8 @@ $$EN73:
 ;	$ENDIF				;AN000;
 $$IF78:
 	SaveReg <ES,DI> 		;Save regs
+	push	ds			;4.0z: the FCB is in DS; SETFAT left ES
+	pop	es			; in the FAT table on a 16-bit FAT
 	call	sfFromFCB		;Get sf pointer
 sfsize: sub	word ptr ES:[di].sf_size,ax ;Adjust internal file sizes
 	sbb	word ptr ES:[di].sf_size+2,bp ;   "  "	 "  "

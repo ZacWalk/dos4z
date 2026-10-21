@@ -56,7 +56,7 @@ if ($New -or -not (Test-Path $img) -or (Get-Item $img).Length -ne $bytes) {
     [IO.File]::WriteAllText($autoexec, "@ECHO OFF`r`nPROMPT `$P`$G`r`nVER`r`n")
     $dimgArgs = @("-o", $img, "-b", $bin, "-hd", $SizeMB, "-p", $PartitionMB, "-l", "DOS4Z", "-f", $autoexec)
     if ($Lba) { $dimgArgs += "-lba" }
-    foreach ($f in "share.exe", "chkdsk.com", "fdisk.exe", "format.com", "mem.exe") {
+    foreach ($f in "chkdsk.com", "fdisk.exe", "format.com", "mem.exe") {
         $dimgArgs += @("-f", (Join-Path $bin $f))
     }
     & $dimg @dimgArgs
